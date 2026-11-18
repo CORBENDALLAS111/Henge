@@ -19,7 +19,8 @@ mkdir -p "$IOS/build"
 xcodebuild -project Henge.xcodeproj -scheme Henge -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
     -derivedDataPath "$DD" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > "$DD.buildlog" 2>&1 || {
     # Never package what an older build left behind.
-    grep -E "error:|BUILD" "$DD.buildlog" | sort -u
+    echo "==> Xcode diagnostics (error context)" >&2
+    grep -n -B 18 -A 14 -E '(^| )error:|fatal error:|BUILD FAILED|Swift Compiler Error' "$DD.buildlog" | tail -n 160 || true
     echo "==> the build failed; nothing packaged" >&2
     exit 1
 }
