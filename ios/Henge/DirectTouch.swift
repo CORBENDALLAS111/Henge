@@ -308,7 +308,14 @@ struct DirectTouchSurface: UIViewRepresentable {
                 if pendingClick != nil { HengeLog.log("input", "direct touch: guest cursor did not reach tap target") }
                 pendingClick = nil
                 advanceClick(now)
-                if pendingEnd { releaseButton(); pendingEnd = false; dragRequested = false }
+                if pendingEnd {
+                    // Never leave a held guest button behind when mouse
+                    // acceleration prevents the pointer from reaching the end.
+                    releaseButton()
+                    pendingEnd = false
+                    dragRequested = false
+                    HengeLog.log("input", "direct touch: unfinished drag released at timeout")
+                }
             }
 
             let target: CGPoint
@@ -340,6 +347,10 @@ struct DirectTouchSurface: UIViewRepresentable {
                     feedback.impactOccurred()
                     advanceClick(now)
                 }
+                // A quick finger swipe can end before the guest cursor reaches
+                // the touched item. Pending lift must NOT suppress mouse-down:
+                // press at the original target, then traverse to the final
+                // finger position and release there (the native drag sequence).
                 if dragRequested && !buttonHeld &&
                    hypot(startGuest.x - cursor.x, startGuest.y - cursor.y) <= Self.cursorTolerance {
                     henge_vm_mouse_button(0, 1)
