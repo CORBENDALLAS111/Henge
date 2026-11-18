@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage(HardwareMouse.reverseKey) private var reverseScrolling = false
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
     @AppStorage(VolumeClicks.inputModeKey) private var inputMode = VolumeClicks.InputMode.touchscreen
+    @AppStorage("henge.touch.mode") private var touchMode = "trackpad"
     @AppStorage(VolumeClicks.modeKey) private var volumeMode = VolumeClicks.Mode.delayHold
     @AppStorage(VolumeClicks.swapKey) private var swapButtons = false
     @AppStorage(PhysicalMouseButtons.swapKey) private var swapMouseButtons = false
@@ -103,6 +104,20 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Desk.card)
                 }
+                Section("Touch Controls") {
+                    Picker("Control method", selection: $touchMode) {
+                        Text("Trackpad").tag("trackpad")
+                        Text("Direct Touch").tag("direct")
+                    }
+                    .pickerStyle(.segmented)
+                    Text(touchMode == "direct"
+                         ? "Touch a Mac item to select it. Drag a finger to move windows or icons; touch and hold to grab. Two fingers scroll, pinch and use macOS trackpad gestures. A quick two-finger tap right-clicks. The mode only applies to the built-in device screen, not an external monitor."
+                         : "Your fingers operate the Mac's emulated Magic Trackpad. Swipe to move the pointer; tap to click or hold to drag. The portrait trackpad area always remains available.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Text("Direct Touch is experimental: macOS expects a mouse, so Henge continuously aligns its virtual cursor to your finger. Precision may vary with mouse acceleration.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                .listRowBackground(Desk.card)
                 Section("Performance") {
                     Picker("Mac refresh rate", selection: $refreshRate) {
                         Text("30 Hz").tag(30)
