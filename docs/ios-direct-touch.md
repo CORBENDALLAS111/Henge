@@ -55,7 +55,10 @@ physical-input buttons.
 The pointer controller reads back the actual guest cursor and estimates the
 guest's current relative-mouse gain. Large relocations use coarse movements,
 then fine corrections before a click. A fast flick-to-drag is completed after
-the finger lifts if the virtual cursor needs extra time to catch up. Since the
+the finger lifts if the virtual cursor needs extra time to catch up.
+The guest button-down must happen even after a rapid finger lift; an earlier
+state check skipped that event and dropped short window/icon drags. A bounded
+watchdog releases the guest mouse button if the pointer cannot converge. Since the
 guest remains a mouse, **exact Sidecar digitizer semantics are not possible**
 without implementing a new, guest-supported absolute pointing device.
 
