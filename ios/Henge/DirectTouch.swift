@@ -12,15 +12,19 @@ import QuartzCore
 struct DirectTouchSurface: UIViewRepresentable {
     let guestWidth: Int
     let guestHeight: Int
+    let isActive: Bool
 
     func makeUIView(context: Context) -> Surface {
         let view = Surface()
         view.guestSize = CGSize(width: guestWidth, height: guestHeight)
+        view.isUserInteractionEnabled = isActive
         return view
     }
 
     func updateUIView(_ view: Surface, context: Context) {
         view.guestSize = CGSize(width: guestWidth, height: guestHeight)
+        if !isActive { view.reset() }
+        view.isUserInteractionEnabled = isActive
     }
 
     static func dismantleUIView(_ view: Surface, coordinator: ()) { view.reset() }
@@ -59,6 +63,14 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var gestureCancelled = false
         private var displayLink: CADisplayLink?
         private var lastMove: CFTimeInterval = 0
+        // In direct mode the guest applies mouse acceleration. Adapt the relative
+        // movement size from the actual cursor displacement to converge quickly
+        // even on a 4K guest, while preventing high-gain overshoots.
+        private var calibratedGain: CGFloat = 1.8
+        private var previousCursor: CGPoint?
+        private var previousCommand = CGPoint.zero
+        private var lastError = CGPoint.zero
+        private var lastMoveTime: CFTimeInterval = 0
         private let feedback = UIImpactFeedbackGenerator(style: .light)
 
         override init(frame: CGRect) {
@@ -124,6 +136,9 @@ struct DirectTouchSurface: UIViewRepresentable {
             pendingEnd = false
             pendingClick = nil
             queuedClicks.removeAll()
+            previousCursor = nil
+            previousCommand = .zero
+            calibratedGain = 1.8
             stopLink()
         }
 
@@ -218,8 +233,10 @@ struct DirectTouchSurface: UIViewRepresentable {
                 stopLink()
             } else if dragRequested {
                 pendingEnd = true
-                deadline = CACurrentMediaTime() + (buttonHeld ? 0.5 : 0.2)
-                // A grab that has not reached the original target cannot safely start.
+                // Finish even a fast swipe: align to its start, press, travel to
+                // the last finger position and release. Previously rapid drags
+                // were dropped whenever the cursor had not caught up at lift.
+                deadline = CACurrentMediaTime() + 1.2
                 startLink()
             } else {
                 queueClick(0, at: startGuest)
@@ -302,7 +319,19 @@ struct DirectTouchSurface: UIViewRepresentable {
 
             var x: Int32 = 0, y: Int32 = 0
             guard henge_vm_pointer(&x, &y) == 0 else { return }
-            let dx = target.x - CGFloat(x), dy = target.y - CGFloat(y)
+            let cursor = CGPoint(x: CGFloat(x), y: CGFloat(y))
+            if let previousCursor, now - lastMoveTime > 0.025 {
+                let observed = hypot(cursor.x - previousCursor.x, cursor.y - previousCursor.y)
+                let requested = hypot(previousCommand.x, previousCommand.y)
+                // Ignore old samples (different input owners, delayed guest
+                // commits, and gestures) when estimating the mouse gain.
+                if requested >= 4 && observed >= 1 && observed < requested * 16 {
+                    let sample = min(max(observed / requested, 0.3), 8)
+                    calibratedGain = calibratedGain * 0.78 + sample * 0.22
+                }
+                self.previousCursor = nil
+            }
+            let dx = target.x - cursor.x, dy = target.y - cursor.y
             if hypot(dx, dy) <= Self.cursorTolerance {
                 if let button = pendingClick {
                     henge_vm_mouse_button(button, 1)
@@ -311,14 +340,14 @@ struct DirectTouchSurface: UIViewRepresentable {
                     feedback.impactOccurred()
                     advanceClick(now)
                 }
-                if dragRequested && !buttonHeld && !pendingEnd &&
-                   hypot(startGuest.x - CGFloat(x), startGuest.y - CGFloat(y)) <= Self.cursorTolerance {
+                if dragRequested && !buttonHeld &&
+                   hypot(startGuest.x - cursor.x, startGuest.y - cursor.y) <= Self.cursorTolerance {
                     henge_vm_mouse_button(0, 1)
                     buttonHeld = true
                     feedback.impactOccurred()
                 }
-                if pendingEnd && (!buttonHeld ||
-                   hypot(latestGuest.x - CGFloat(x), latestGuest.y - CGFloat(y)) <= Self.cursorTolerance) {
+                if pendingEnd && buttonHeld &&
+                   hypot(latestGuest.x - cursor.x, latestGuest.y - cursor.y) <= Self.cursorTolerance {
                     releaseButton()
                     pendingEnd = false
                     dragRequested = false
@@ -326,13 +355,29 @@ struct DirectTouchSurface: UIViewRepresentable {
                 if primary == nil && pendingClick == nil && !dragRequested { stopLink() }
                 return
             }
-            // Relative mouse acceleration is guest-controlled. Closed-loop feedback
-            // corrects overshoot, with capped writes to avoid flooding the virtio queue.
-            guard now - lastMove >= 0.032 else { return }
+            // Closed-loop cursor positioning. High distances use larger coarse
+            // moves, small distances use precise corrections. This is mouse
+            // emulation, not a real absolute HID digitizer, so we wait for the
+            // guest cursor feedback and learn its acceleration scale.
+            guard now - lastMove >= 0.025 else { return }
             lastMove = now
-            let mx = Int32(min(max((dx * 0.38).rounded(), -180), 180))
-            let my = Int32(min(max((dy * 0.38).rounded(), -180), 180))
-            if mx != 0 || my != 0 { henge_vm_mouse_move(mx, my) }
+            let distance = hypot(dx, dy)
+            let cap: CGFloat = distance > 900 ? 450 : distance > 250 ? 240 : 80
+            let factor: CGFloat = distance > 250 ? 0.85 : 0.65
+            let gain = max(calibratedGain, 0.3)
+            func component(_ d: CGFloat) -> Int32 {
+                guard abs(d) > Self.cursorTolerance else { return 0 }
+                let value = min(max((d / gain * factor).rounded(), -cap), cap)
+                return Int32(value == 0 ? (d > 0 ? 1 : -1) : value)
+            }
+            let mx = component(dx), my = component(dy)
+            if mx != 0 || my != 0 {
+                previousCursor = cursor
+                previousCommand = CGPoint(x: CGFloat(mx), y: CGFloat(my))
+                lastMoveTime = now
+                lastError = CGPoint(x: dx, y: dy)
+                henge_vm_mouse_move(mx, my)
+            }
         }
     }
 }
