@@ -13,14 +13,12 @@
 
 name: Build Henge IPA
 
-# Manual builds remain available. A workflow-file push with [build-ipa] in the
-# commit message also starts a build. Ordinary source pushes do not build.
+# Manual builds remain available. A main-branch push with [build-ipa]
+# in its commit message starts a build. Ordinary pushes skip the job.
 on:
   workflow_dispatch: {}
   push:
     branches: [main]
-    paths:
-      - .github/workflows/build-henge.yml
 
 env:
   HUSK: ${{ github.workspace }}/Husk
@@ -53,6 +51,16 @@ jobs:
         with:
           repository: Leviidev/Husk
           path: Husk
+
+      - name: Parse Henge Swift sources
+        working-directory: Henge
+        run: |
+          xcrun swiftc -frontend -parse \
+            ios/Henge/DirectTouch.swift \
+            ios/Henge/MacSettingsView.swift \
+            ios/Henge/SessionView.swift \
+            ios/Henge/SettingsView.swift \
+            ios/Henge/Machines.swift
 
       - name: Cache Husk's sources and prebuilt iOS pieces
         uses: actions/cache@v4
