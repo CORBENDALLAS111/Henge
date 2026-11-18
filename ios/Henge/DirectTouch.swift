@@ -311,12 +311,14 @@ struct DirectTouchSurface: UIViewRepresentable {
                     feedback.impactOccurred()
                     advanceClick(now)
                 }
-                if dragRequested && !buttonHeld && !pendingEnd {
+                if dragRequested && !buttonHeld && !pendingEnd &&
+                   hypot(startGuest.x - CGFloat(x), startGuest.y - CGFloat(y)) <= Self.cursorTolerance {
                     henge_vm_mouse_button(0, 1)
                     buttonHeld = true
                     feedback.impactOccurred()
                 }
-                if pendingEnd {
+                if pendingEnd && (!buttonHeld ||
+                   hypot(latestGuest.x - CGFloat(x), latestGuest.y - CGFloat(y)) <= Self.cursorTolerance) {
                     releaseButton()
                     pendingEnd = false
                     dragRequested = false
