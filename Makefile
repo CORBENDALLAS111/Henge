@@ -103,6 +103,13 @@ test-vm-lifecycle: $(B)/test_vm_lifecycle
 $(B)/test_pvg_lifecycle: tests/test_pvg_lifecycle.m $(ENGINE) $(DEV)
 	$(CC) $(CFLAGS) -fobjc-arc $^ $(METAL_LIBS) -o $@
 
+$(B)/test_pvg_surfaces: tests/test_pvg_surfaces.m devices/pvg_metal.m devices/pvg_colorprobe.h $(B)/metallib.o | $(B)
+	$(CC) $(CFLAGS) -fobjc-arc -Wno-unused-parameter -Wno-deprecated-declarations tests/test_pvg_surfaces.m $(B)/metallib.o $(METAL_LIBS) -o $@
+
+test-pvg-surfaces: $(B)/test_pvg_surfaces
+	$(B)/test_pvg_surfaces
+.PHONY: test-pvg-surfaces
+
 $(B)/hvsparse: tools/hvsparse_main.c host/hvsparse.c host/hvsparse.h | $(B)
 	$(CC) $(CFLAGS) tools/hvsparse_main.c host/hvsparse.c -o $@
 
