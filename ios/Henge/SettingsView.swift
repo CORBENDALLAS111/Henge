@@ -107,14 +107,11 @@ struct SettingsView: View {
                 Section("Touch Controls") {
                     Picker("Control method", selection: $touchMode) {
                         Text("Trackpad").tag("trackpad")
-                        Text("Direct Touch").tag("direct")
+                        Text("Direct Touch (fallback)").tag("direct")
                     }
                     .pickerStyle(.segmented)
-                    Text(touchMode == "direct"
-                         ? "Touch a Mac item to select it. Drag a finger to move windows or icons; touch and hold to grab. Two fingers scroll, pinch and use macOS trackpad gestures. A quick two-finger tap right-clicks. The mode only applies to the built-in device screen, not an external monitor."
-                         : "Your fingers operate the Mac's emulated Magic Trackpad. Swipe to move the pointer; tap to click or hold to drag. The portrait trackpad area always remains available.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Text("Direct Touch is experimental: macOS expects a mouse, so Henge continuously aligns its virtual cursor to your finger. Precision may vary with mouse acceleration.")
+                    Text(touchMode == "direct" ? TouchInputSafety.fallbackDescription
+                         : "Swipe to move the pointer; tap to click or hold then move to drag. Touch input pauses while a physical mouse is connected.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 .listRowBackground(Desk.card)

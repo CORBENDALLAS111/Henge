@@ -35,6 +35,13 @@ struct PhysicalMouseButtonTests {
         check(swapped.event(3, pressed: true) == nil, "unsupported code must be ignored")
         check(swapped.held.isEmpty, "invalid input must not stick")
 
+        var shared = PhysicalMouseButtons(swapsRightAndMiddle: false)
+        check(shared.event(0, pressed: true, source: "A") == 0, "first mouse presses")
+        check(shared.event(0, pressed: true, source: "B") == 0, "second mouse holds too")
+        check(shared.event(0, pressed: false, source: "A") == nil, "one mouse cannot release another's drag")
+        check(shared.disconnect("A").isEmpty, "disconnect does not release other mouse")
+        check(shared.disconnect("B") == [0], "last owner disconnect releases")
+
         print("PASS: standard mapping, right/middle swap, left drag, releases and disconnect cleanup")
     }
 }
