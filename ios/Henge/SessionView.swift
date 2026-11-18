@@ -92,7 +92,12 @@ struct SessionView: View {
                     if touchMode == "direct" && !display.isExternal {
                         // Above the trackpad hit surface, but only on the visible Mac pixels.
                         // Portrait's separate trackpad panel remains usable for fine control.
-                        DirectTouchSurface(guestWidth: mac.screen.width, guestHeight: mac.screen.height)
+                        DirectTouchSurface(
+                            guestWidth: mac.screen.width,
+                            guestHeight: mac.screen.height,
+                            isActive: scenePhase == .active && state == 1 &&
+                                !showDetails && !confirmStop && error == nil
+                        )
                             .frame(width: layout.screen.width, height: layout.screen.height)
                             .position(x: layout.screen.midX, y: layout.screen.midY)
                             .accessibilityLabel("Direct Mac touch surface")
