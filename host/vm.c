@@ -689,11 +689,11 @@ static void move_now(void *ctx) {
 }
 
 void hv_vm_mouse_move(int dx, int dy) {
-    if (atomic_load(&input_stopping)) return;
+    int stopped = atomic_load(&input_stopping);
     int64_t packed = (int64_t)((uint64_t)(uint32_t)dx << 32 | (uint32_t)dy);
     uint64_t generation = atomic_load(&pointer_generation);
     dispatch_async(pointer_queue(), ^{
-        if (generation == atomic_load(&pointer_generation)) move_now((void *)(intptr_t)packed);
+        if (!stopped && generation == atomic_load(&pointer_generation)) move_now((void *)(intptr_t)packed);
     });
 }
 

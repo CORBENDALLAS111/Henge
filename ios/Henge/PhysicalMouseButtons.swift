@@ -10,6 +10,10 @@ struct PhysicalMouseButtons {
     private(set) var held: Set<Int32> = []
     private var owners: [AnyHashable: Set<Int32>] = [:]
 
+    init(swapsRightAndMiddle: Bool) {
+        self.swapsRightAndMiddle = swapsRightAndMiddle
+    }
+
     mutating func event(_ physicalButton: Int32, pressed: Bool, source: AnyHashable = 0) -> Int32? {
         guard (0...2).contains(physicalButton) else { return nil }
         let guestButton = swapsRightAndMiddle && physicalButton != 0 ? 3 - physicalButton : physicalButton
@@ -17,6 +21,7 @@ struct PhysicalMouseButtons {
             owners[source, default: []].insert(guestButton)
             held.insert(guestButton)
         } else {
+            guard owners[source]?.contains(guestButton) == true else { return nil }
             owners[source]?.remove(guestButton)
             if owners.values.contains(where: { $0.contains(guestButton) }) { return nil }
             held.remove(guestButton)

@@ -248,6 +248,7 @@ final class HardwareMouse {
         guard let input = mouse.mouseInput, !mice.contains(where: { $0 === mouse }) else { return }
         mice.append(mouse)
         mouse.handlerQueue = .main
+        releaseButtons()
         NotificationCenter.default.post(name: TouchInputSafety.reset, object: nil)
         VolumeClicks.shared.releaseButtons()
         henge_vm_pointer_reset()

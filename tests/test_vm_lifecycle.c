@@ -115,6 +115,45 @@ int main(void) {
         check("boot succeeds without restarting app", rc == 0);
         if (rc) break;
         if (outcome == HENGE_VM_OUTCOME_HOST_STOP) {
+            /* This ROM loops without a virtio driver, so events stay in the
+               native ring. Check queue cancellation and frame ordering without
+               depending on macOS acceleration or display feedback. */
+            henge_vm_mouse_button(1, 1); /* may be in its 50 ms Control delay */
+            for (int move = 0; move < 200; move++) henge_vm_mouse_move(99, 99);
+            henge_vm_pointer_reset();
+            henge_vm_mouse_scroll(0, 17);
+            henge_vm_mouse_button(0, 1);
+            henge_vm_mouse_button(0, 0); /* last event marks the queue drained */
+            HvVirtioInput *mouse = hv_vm_board()->mouse;
+            uint32_t count = 0;
+            for (int n = 0; n < 1000; n++) {
+                pthread_mutex_lock(&mouse->mu);
+                count = mouse->tail - mouse->head;
+                int ended = count >= 6 && mouse->ring[(mouse->tail - 2) % HV_VINPUT_RING].type == HV_EV_KEY &&
+                    mouse->ring[(mouse->tail - 2) % HV_VINPUT_RING].code == HV_BTN_LEFT &&
+                    mouse->ring[(mouse->tail - 2) % HV_VINPUT_RING].value == 0;
+                pthread_mutex_unlock(&mouse->mu);
+                if (ended) break;
+                usleep(1000);
+            }
+            pthread_mutex_lock(&mouse->mu);
+            uint32_t end = mouse->tail;
+            check("pointer reset and new input reach guest", count >= 8);
+            if (count >= 8) {
+                check("wheel stays before new button press", mouse->ring[(end - 6) % HV_VINPUT_RING].code == HV_REL_WHEEL &&
+                    mouse->ring[(end - 6) % HV_VINPUT_RING].value == 17);
+                check("new press survives reset", mouse->ring[(end - 4) % HV_VINPUT_RING].code == HV_BTN_LEFT &&
+                    mouse->ring[(end - 4) % HV_VINPUT_RING].value == 1);
+                int left = 0, middle = 0;
+                for (uint32_t at = mouse->head; at != end; at++) {
+                    uint32_t slot = at % HV_VINPUT_RING;
+                    if (mouse->ring[slot].type != HV_EV_KEY) continue;
+                    if (mouse->ring[slot].code == HV_BTN_LEFT) left = mouse->ring[slot].value;
+                    if (mouse->ring[slot].code == HV_BTN_MIDDLE) middle = mouse->ring[slot].value;
+                }
+                check("reset releases guest buttons", !left && !middle);
+            }
+            pthread_mutex_unlock(&mouse->mu);
             henge_vm_mouse_button(0, 1);
             henge_vm_mouse_button(1, 1);
             henge_vm_mouse_move(5, 7);

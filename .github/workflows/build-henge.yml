@@ -117,6 +117,7 @@ jobs:
           make build/test_dns_lifecycle build/test_pvg_lifecycle
           build/test_dns_lifecycle
           build/test_pvg_lifecycle
+          make test-vm-lifecycle
 
       - name: Check iOS Objective-C SDK headers
         working-directory: Henge

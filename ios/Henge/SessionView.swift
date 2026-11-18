@@ -212,6 +212,7 @@ struct SessionView: View {
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             HardwareMouse.shared.start()
+            HardwareMouse.shared.setActive(touchInputActive)
             VolumeClicks.shared.start()
         }
         .onDisappear {
@@ -699,7 +700,7 @@ struct SessionView: View {
                 StickyKeys.shared.releaseAll()
                 HardwareKeys.releaseAll()
                 resetPointerInput()
-            HardwareMouse.shared.stop()
+                HardwareMouse.shared.stop()
                 UIApplication.shared.isIdleTimerDisabled = false
                 HengeLog.log("session", "showing stopped Mac: \(String(cString: henge_vm_exit_reason()))")
                 if henge_vm_exit_outcome() == Int32(HENGE_VM_OUTCOME_RESTART.rawValue) && henge_vm_can_start() != 0 {
