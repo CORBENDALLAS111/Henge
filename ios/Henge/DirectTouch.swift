@@ -148,7 +148,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             for t in down { active.insert(t) }
             if active.count >= 2 {
                 if !multi { beginMulti() }
-                else { addMulti(down) }
+                else { addMulti(Array(down)) }
                 return
             }
             guard !multi, let t = active.first else { return }
