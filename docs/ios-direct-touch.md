@@ -47,9 +47,17 @@ during boot, heavy load or in high guest resolutions. The app drops a tap when
 its target cannot be reached before the deadline, rather than clicking the
 wrong Mac control.
 
-The touch view resets held mouse buttons and emulated fingers when removed,
-cancelled or switched to Trackpad mode. The scene's background handler still
-releases physical-input buttons.
+The direct-touch view resets held mouse buttons and emulated fingers when
+removed, cancelled, when the app goes inactive, when a sheet opens, or when
+switching to Trackpad mode. The scene's background handler still releases
+physical-input buttons.
+
+The pointer controller reads back the actual guest cursor and estimates the
+guest's current relative-mouse gain. Large relocations use coarse movements,
+then fine corrections before a click. A fast flick-to-drag is completed after
+the finger lifts if the virtual cursor needs extra time to catch up. Since the
+guest remains a mouse, **exact Sidecar digitizer semantics are not possible**
+without implementing a new, guest-supported absolute pointing device.
 
 ### Verification / hardware QA
 
