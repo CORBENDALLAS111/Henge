@@ -53,6 +53,7 @@ Then a Henge folder in the Mac's home folder is the same folder as Files › Hen
 ## Known limits
 
 - Signing in to an Apple Account inside macOS fails with a verification error.
+  See [Apple services diagnostics and platform limits](docs/apple-services.md).
 - Graphics are tested on macOS's own apps, Chrome, Firefox, VS Code and Discord. Other apps may draw wrongly.
 - On macOS Sonoma, switching to a dynamic wallpaper (such as Sonoma) can stop the screen updating; opening any app brings it back. On Ventura, the Calendar icon in the Dock is missing its date.
 - For the first few minutes after you log in, macOS is busy starting up in the background, so apps open more slowly.

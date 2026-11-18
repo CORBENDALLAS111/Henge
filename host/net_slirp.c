@@ -14,6 +14,7 @@
 
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -288,7 +289,7 @@ int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
     pthread_mutex_init(&to_guest.mu, NULL);
     pthread_mutex_init(&to_host.mu, NULL);
     queues_initialized = 1;
-    if (pipe(wake_pipe) != 0) { hv_net_detach(); return -1; }
+    if (pipe(wake_pipe) != 0) { fprintf(stderr, "hengevm: net: wake pipe failed errno=%d\n", errno); hv_net_detach(); return -1; }
     fcntl(wake_pipe[0], F_SETFL, O_NONBLOCK);
     fcntl(wake_pipe[1], F_SETFL, O_NONBLOCK);
     SlirpConfig cfg;
@@ -304,7 +305,7 @@ int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
     cfg.if_mtu = 1500;
     cfg.if_mru = 1500;
     slirp = slirp_new(&cfg, &callbacks, NULL);
-    if (!slirp) { hv_net_detach(); return -1; }
+    if (!slirp) { fprintf(stderr, "hengevm: net: libslirp initialization failed\n"); hv_net_detach(); return -1; }
     if (getenv("HV_NET_FWD")) { /* debugging: "hostport:guestport", from this Mac's loopback into the guest */
         int hp, gp;
         struct in_addr h, g;
@@ -321,8 +322,11 @@ int hv_net_attach(HvMachine *m, HvVirtioNet *n) {
     }
     net = n;
     n->transmit = transmit;
-    if (pthread_create(&network_thread, NULL, net_thread, NULL) != 0) { hv_net_detach(); return -1; }
+    int thread_error = pthread_create(&network_thread, NULL, net_thread, NULL);
+    if (thread_error != 0) { fprintf(stderr, "hengevm: net: worker failed code=%d\n", thread_error); hv_net_detach(); return -1; }
     thread_started = 1;
+    fprintf(stderr, "hengevm: net: IPv4 NAT ready; DNS=%s; host_unix_time=%lld; guest owns HTTPS/TLS\n",
+            hv_dns_proxy_on() ? "system resolver" : "libslirp", (long long)time(NULL));
     return 0;
 }
 

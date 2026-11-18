@@ -43,12 +43,14 @@ typedef struct {
     char name[1025];
     Answer ans[MAX_ANSWERS];
     int nans, nodata, failed, done;
+    DNSServiceErrorType resolver_error;
 } Query;
 
 static atomic_int inflight, unanswered_in_a_row;
 static atomic_ullong answered, handed_back, timed_out;
 #define GIVE_UP 8 /* lookups in a row the resolver took but never answered: back to libslirp for the session */
 static atomic_int stopping;
+static atomic_uint failure_logs;
 static pthread_mutex_t lifecycle_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t lifecycle_cv = PTHREAD_COND_INITIALIZER;
 
@@ -66,6 +68,7 @@ void hv_dns_proxy_start(void) {
     atomic_store(&handed_back, 0);
     atomic_store(&timed_out, 0);
     atomic_store(&unanswered_in_a_row, 0);
+    atomic_store(&failure_logs, 0);
     pthread_mutex_unlock(&lifecycle_mu);
 }
 
@@ -124,6 +127,7 @@ static void DNSSD_API on_record(DNSServiceRef ref, DNSServiceFlags flags, uint32
     if (err == kDNSServiceErr_NoSuchRecord || err == kDNSServiceErr_NoSuchName) {
         q->nodata = 1; /* no such name, or nothing of this type: either way an empty answer */
     } else if (err) {
+        q->resolver_error = err;
         q->failed = 1;
         q->done = 1;
         return;
@@ -227,6 +231,8 @@ static void *lookup(void *arg) {
                                                     q->qclass, on_record, q);
     if (err != kDNSServiceErr_NoError) {
         if (!atomic_load(&stopping)) {
+            if (atomic_fetch_add(&failure_logs, 1) < 12)
+                fprintf(stderr, "hengevm: dns: start failed code=%d type=%u; using libslirp (query name omitted)\n", (int)err, q->qtype);
             q->send(q->frame, q->len, 0); /* libslirp, as before */
             atomic_fetch_add(&handed_back, 1);
         }
@@ -238,7 +244,9 @@ static void *lookup(void *arg) {
             if (left <= 0) break;
             struct pollfd p = {fd, POLLIN, 0};
             int r = poll(&p, 1, (int)(left < 100 ? left : 100));
-            if (r > 0 && DNSServiceProcessResult(ref) != kDNSServiceErr_NoError) {
+            DNSServiceErrorType process_error = r > 0 ? DNSServiceProcessResult(ref) : kDNSServiceErr_NoError;
+            if (process_error != kDNSServiceErr_NoError) {
+                q->resolver_error = process_error;
                 q->failed = 1;
                 break;
             }
@@ -246,6 +254,8 @@ static void *lookup(void *arg) {
         DNSServiceRefDeallocate(ref);
         if (!atomic_load(&stopping)) {
             if (!q->done || q->failed) {
+                if (atomic_fetch_add(&failure_logs, 1) < 12)
+                    fprintf(stderr, "hengevm: dns: lookup failed code=%d timeout=%d type=%u; returning SERVFAIL (query name omitted)\n", (int)q->resolver_error, !q->done && !q->failed, q->qtype);
                 atomic_fetch_add(&timed_out, 1);
                 if (atomic_fetch_add(&unanswered_in_a_row, 1) + 1 == GIVE_UP && hv_knob[HV_K_DNSPROXY]) {
                     hv_knob[HV_K_DNSPROXY] = 0; /* not hv_knob_set: no translation depends on it */
