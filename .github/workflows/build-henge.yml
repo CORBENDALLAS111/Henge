@@ -103,9 +103,24 @@ jobs:
         working-directory: Henge
         run: make ios-lib
 
+      - name: Check iOS Objective-C SDK headers
+        working-directory: Henge
+        run: |
+          set -e
+          echo '#import <Foundation/Foundation.h>' | xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 -fsyntax-only -x objective-c -
+          echo "iOS Objective-C Foundation preprocessing OK"
+
       - name: Package Henge.ipa
         working-directory: Henge
         run: zsh ios/scripts/package_ipa.sh
+
+      - name: Upload Xcode build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Henge-xcode-buildlog-${{ github.sha }}
+          path: Henge/ios/build/DerivedData.buildlog
+          if-no-files-found: warn
 
       - name: Upload Henge.ipa
         uses: actions/upload-artifact@v4
