@@ -16,6 +16,8 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     /// The size macOS is told its screen is. Macs made before this was a choice have none: 16:9.
     var screenWidth: Int?
     var screenHeight: Int?
+    /// Optional for backwards-compatible machines.json decoding.
+    var customResolution: Bool?
     /// m4 fork: the iPad's own panel at Retina density. On by default on iPad, for Macs that never chose.
     var retina: Bool?
     /// About This Mac reports the device Henge runs on (its name and chip) instead of the
