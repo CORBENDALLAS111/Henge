@@ -48,6 +48,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var deadline: CFTimeInterval = 0
         private var pendingClick: Int32?
         private var clickGuest = CGPoint.zero
+        private var queuedClicks: [(Int32, CGPoint)] = []
 
         private var multi = false
         private var ids: [UITouch: Int32] = [:]
@@ -122,6 +123,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             dragRequested = false
             pendingEnd = false
             pendingClick = nil
+            queuedClicks.removeAll()
             stopLink()
         }
 
@@ -135,7 +137,7 @@ struct DirectTouchSurface: UIViewRepresentable {
                 return
             }
             guard !multi, let t = active.first else { return }
-            pendingClick = nil
+            // Preserve an earlier click still converging on its target.
             primary = t
             startTime = CACurrentMediaTime()
             startScreen = t.location(in: self)
@@ -210,6 +212,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             if cancelled {
                 releaseButton()
                 pendingClick = nil
+                queuedClicks.removeAll()
                 dragRequested = false
                 pendingEnd = false
                 stopLink()
@@ -227,15 +230,28 @@ struct DirectTouchSurface: UIViewRepresentable {
         private func queueClick(_ button: Int32, at guest: CGPoint) {
             dragRequested = false
             pendingEnd = false
+            if pendingClick != nil {
+                if queuedClicks.count < 4 { queuedClicks.append((button, guest)) }
+                return
+            }
             pendingClick = button
             clickGuest = guest
             deadline = CACurrentMediaTime() + 0.7
             startLink()
         }
 
+        private func advanceClick(_ now: CFTimeInterval) {
+            guard !queuedClicks.isEmpty else { return }
+            let (button, point) = queuedClicks.removeFirst()
+            pendingClick = button
+            clickGuest = point
+            deadline = now + 0.7
+        }
+
         private func beginMulti() {
             releaseButton()
             pendingClick = nil
+            queuedClicks.removeAll()
             primary = nil
             dragRequested = false
             pendingEnd = false
@@ -274,6 +290,7 @@ struct DirectTouchSurface: UIViewRepresentable {
                 // A missed target is safer than an accidental click on the wrong Mac control.
                 if pendingClick != nil { HengeLog.log("input", "direct touch: guest cursor did not reach tap target") }
                 pendingClick = nil
+                advanceClick(now)
                 if pendingEnd { releaseButton(); pendingEnd = false; dragRequested = false }
             }
 
@@ -292,6 +309,7 @@ struct DirectTouchSurface: UIViewRepresentable {
                     henge_vm_mouse_button(button, 0)
                     pendingClick = nil
                     feedback.impactOccurred()
+                    advanceClick(now)
                 }
                 if dragRequested && !buttonHeld && !pendingEnd {
                     henge_vm_mouse_button(0, 1)
