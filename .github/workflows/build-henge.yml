@@ -13,9 +13,14 @@
 
 name: Build Henge IPA
 
-# Manual only (Actions tab > Build Henge IPA > Run workflow): pushes to main don't build an IPA.
+# Manual builds remain available. A workflow-file push with [build-ipa] in the
+# commit message also starts a build. Ordinary source pushes do not build.
 on:
   workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-henge.yml
 
 env:
   HUSK: ${{ github.workspace }}/Husk
@@ -26,6 +31,7 @@ env:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-ipa]')
     # Xcode 27 image (arm64, GA since Oct 2026). Plain `xcode-27` is a standard
     # runner, so it's free on public repos; `xcode-27-xlarge` is a paid larger
     # runner. Table: https://github.com/actions/runner-images#available-images
