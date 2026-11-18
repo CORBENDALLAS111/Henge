@@ -8,8 +8,14 @@ struct MacSettingsView: View {
     @State private var confirmDelete = false
     @State private var movingExport = false
     @AppStorage("henge.cpus") private var cpus = 4
+    @State private var customWidth: String
+    @State private var customHeight: String
 
-    init(mac: VirtualMac) { _mac = State(initialValue: mac) }
+    init(mac: VirtualMac) {
+        _mac = State(initialValue: mac)
+        _customWidth = State(initialValue: String(mac.screen.width))
+        _customHeight = State(initialValue: String(mac.screen.height))
+    }
 
     var body: some View {
         ScrollView {
@@ -74,38 +80,72 @@ struct MacSettingsView: View {
                 .padding(17)
                 .deskCard()
 
-                if Device.fittingScreen.height != 1080 {
-                    DeskHeading("Screen")
-                    VStack(alignment: .leading, spacing: 12) {
-                        Picker("Screen", selection: Binding(get: {
-                            if mac.isRetina { return "retina" }
-                            if mac.screen.width == Device.performanceScreen.width,
-                               mac.screen.height == Device.performanceScreen.height { return "performance" }
-                            if mac.screen.width == 1920, mac.screen.height == 1080 { return "wide" }
-                            return "fit"
-                        }, set: { choice in
+                DeskHeading("Screen")
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Resolution", selection: Binding(get: {
+                        if mac.customResolution == true { return "custom" }
+                        if mac.isRetina { return "retina" }
+                        if mac.screen.width == Device.performanceScreen.width,
+                           mac.screen.height == Device.performanceScreen.height { return "performance" }
+                        if mac.screen.width == 1920, mac.screen.height == 1080 { return "wide" }
+                        return "fit"
+                    }, set: { choice in
+                        if choice == "custom" {
+                            let current = mac.screen
+                            let size = validCustomResolution ?? current
+                            mac.retina = false
+                            mac.customResolution = true
+                            (mac.screenWidth, mac.screenHeight) = size
+                            customWidth = String(size.width)
+                            customHeight = String(size.height)
+                        } else {
                             mac.retina = choice == "retina"
+                            mac.customResolution = false
                             switch choice {
                             case "retina": break
                             case "performance": (mac.screenWidth, mac.screenHeight) = Device.performanceScreen
                             case "wide": (mac.screenWidth, mac.screenHeight) = (1920, 1080)
                             default: (mac.screenWidth, mac.screenHeight) = Device.fittingScreen
                             }
-                            save()
-                        })) {
-                            if Device.isPad {
-                                Text("Retina").tag("retina")
-                                Text("Performance").tag("performance")
-                            }
-                            Text("Fit this \(Device.name)").tag("fit")
-                            Text("16:9").tag("wide")
                         }
-                        .pickerStyle(.segmented)
-                        Text("\(mac.screen.width) × \(mac.screen.height). \(Device.isPad ? "Performance renders about 30% fewer pixels. " : "")Changes apply the next time this Mac starts.")
-                            .font(.system(size: 13)).foregroundStyle(Desk.dim)
+                        save()
+                    })) {
+                        if Device.isPad {
+                            Text("Retina").tag("retina")
+                            Text("Performance").tag("performance")
+                        }
+                        Text("Fit this \(Device.name)").tag("fit")
+                        Text("16:9").tag("wide")
+                        Text("Custom").tag("custom")
                     }
-                    .padding(17)
-                    .deskCard()
+                    .pickerStyle(.menu)
+
+                    if mac.customResolution == true {
+                        HStack(spacing: 12) {
+                            TextField("Width", text: $customWidth)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("Custom screen width in pixels")
+                            Text("×").foregroundStyle(Desk.dim)
+                            TextField("Height", text: $customHeight)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("Custom screen height in pixels")
+                        }
+                        if let size = validCustomResolution {
+                            Button("Apply custom resolution") {
+                                (mac.screenWidth, mac.screenHeight) = size
+                                save()
+                            }
+                            .disabled(mac.screen.width == size.width && mac.screen.height == size.height)
+                        } else {
+                            Text("Enter 640–7680 × 480–4320 pixels, up to 8.3 million pixels.")
+                                .font(.system(size: 13)).foregroundStyle(Desk.bad)
+                        }
+                    }
+
+                    Text("\(mac.screen.width) × \(mac.screen.height). Changes apply the next time this Mac starts.")
+                        .font(.system(size: 13)).foregroundStyle(Desk.dim)
                 }
 
                 DeskHeading("Storage")
@@ -188,6 +228,15 @@ struct MacSettingsView: View {
             .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
+    }
+
+    /// Invalid drafts are not saved to guest configuration.
+    private var validCustomResolution: (width: Int, height: Int)? {
+        guard let width = Int(customWidth.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let height = Int(customHeight.trimmingCharacters(in: .whitespacesAndNewlines)),
+              (640...7680).contains(width), (480...4320).contains(height),
+              width * height <= 8_294_400 else { return nil }
+        return (width, height)
     }
 
     private func save() {

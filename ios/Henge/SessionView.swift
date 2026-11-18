@@ -24,6 +24,7 @@ struct SessionView: View {
     @AppStorage("henge.cpus") private var cpus = 4
     @AppStorage("henge.matchScreenColors") private var matchScreenColors = true
     @AppStorage("henge.display.brightness") private var screenBrightness = 1.0
+    @AppStorage("henge.touch.mode") private var touchMode = "trackpad"
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -88,6 +89,14 @@ struct SessionView: View {
                     Trackpad()
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
+                    if touchMode == "direct" && !display.isExternal {
+                        // Above the trackpad hit surface, but only on the visible Mac pixels.
+                        // Portrait's separate trackpad panel remains usable for fine control.
+                        DirectTouchSurface(guestWidth: mac.screen.width, guestHeight: mac.screen.height)
+                            .frame(width: layout.screen.width, height: layout.screen.height)
+                            .position(x: layout.screen.midX, y: layout.screen.midY)
+                            .accessibilityLabel("Direct Mac touch surface")
+                    }
                     if inputMode == .volumeButtons && volumeMode == .intercept {
                         // The capture interaction must live in the SwiftUI hierarchy to receive
                         // the volume-button events; it passes touches through to the trackpad.
@@ -494,6 +503,17 @@ struct SessionView: View {
                     LabeledContent("Brightness", value: "\(Int(screenBrightness * 100))%")
                     Slider(value: $screenBrightness, in: 0.4...1)
                     Text("Brightness dims only the Mac's screen.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Touch Controls") {
+                    Picker("Mode", selection: $touchMode) {
+                        Text("Trackpad").tag("trackpad")
+                        Text("Direct Touch").tag("direct")
+                    }
+                    .pickerStyle(.segmented)
+                    Text(display.isExternal
+                         ? "Direct Touch is unavailable on an external monitor. The device remains a trackpad."
+                         : "In Direct Touch, tap an item to click, drag or hold to pick it up, and use two fingers to scroll or pinch. Four-finger tap reveals hidden controls. Switching modes is immediate.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Pointer") {
