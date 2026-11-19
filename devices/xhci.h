@@ -4,20 +4,21 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include "absolute_pen.h"
+#include "usb_gamepad.h"
 
 #include "pcie.h"
 
 /* An xHCI USB host controller (xHCI 1.0, one interrupter, 32-byte contexts,
-   INTx) with three USB HID devices: a boot keyboard on port 1, a Magic
-   Trackpad 2 on port 2 and a standard absolute pen on port 3. The keyboard is
+   INTx) with four USB HID devices: a boot keyboard on port 1, a Magic
+   Trackpad 2 on port 2, an absolute pen on port 3 and a gamepad on port 4. The keyboard is
    what Virtualization.framework gives a macOS guest as
    its "Virtual USB Keyboard", plus Apple's multitouch pad, so the guest's
    own gesture engine sees a real trackpad. Changes come from the host UI on
    any thread (hv_xhci_key, hv_xhci_touch); the CPU thread delivers them
    (hv_xhci_poll). */
 #define HV_XHCI_SLOTS 8
-#define HV_XHCI_PORTS 3
-#define HV_XHCI_DEVICES 3
+#define HV_XHCI_PORTS 4
+#define HV_XHCI_DEVICES 4
 #define HV_XHCI_INTRS 4
 #define HV_XHCI_EPS 32 /* device context index 1..31 */
 #define HV_XHCI_REPORTS 256
@@ -55,7 +56,7 @@ typedef struct HvXhci {
     /* device slots: -1 until the device on the slot's port is addressed */
     int slot_used[HV_XHCI_SLOTS + 1];
     struct HvXhciSlot {
-        int dev;         /* 0 keyboard, 1 trackpad, 2 pen, -1 none */
+        int dev;         /* 0 keyboard, 1 trackpad, 2 pen, 3 gamepad, -1 none */
         int configured;
         HvXhciRing ep[HV_XHCI_EPS];
         int ep_running[HV_XHCI_EPS];
@@ -94,6 +95,9 @@ typedef struct HvXhci {
     unsigned pen_ready_logs;
     _Atomic int pen_ready;
     int pen_blocked;
+    HvGamepadQueue gamepad;
+    _Atomic int gamepad_ready, gamepad_accepting;
+    unsigned gamepad_ready_logs;
 } HvXhci;
 
 HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus);
@@ -116,6 +120,11 @@ void hv_xhci_touch_button(HvXhci *x, int down);
 int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y, int twist, int flags);
 void hv_xhci_pen_cancel(HvXhci *x);
 int hv_xhci_pen_ready(HvXhci *x);
+int hv_xhci_gamepad(HvXhci *x, unsigned buttons, int hat, const int axes[6]);
+void hv_xhci_gamepad_cancel(HvXhci *x);
+int hv_xhci_gamepad_ready(HvXhci *x);
+/* Host lifecycle gate, checked under the input mutex; USB reset cannot reopen it. */
+void hv_xhci_gamepad_active(HvXhci *x, int active);
 /* CPU thread: hand waiting reports to the guest. */
 void hv_xhci_poll(HvXhci *x);
 

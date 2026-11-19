@@ -536,6 +536,7 @@ int hv_vm_pause(void) {
     pause_state = 1;
     pthread_mutex_unlock(&pause_mu);
     atomic_store(&input_stopping, 1);
+    hv_xhci_gamepad_active(board.usb, 0);
     hv_machine_halt(&m, HV_HALT_SAVE);
     pthread_mutex_lock(&pause_mu);
     while (pause_state == 1) pthread_cond_wait(&pause_cv, &pause_mu);
@@ -604,6 +605,7 @@ static void *cpu0_thread(void *unused) {
 }
 
 int hv_vm_start(int cpu0, void (*on_exit)(int reason)) {
+    hv_xhci_gamepad_active(board.usb, 1);
     exit_cb = on_exit;
     cpu0_ours = cpu0;
     if (atomic_exchange(&nudge_after_start, 0)) /* someone is back: macOS counts the time away as idle (display off) */
@@ -671,6 +673,7 @@ static dispatch_queue_t pointer_queue(void) {
 
 static void stop_pointer(void) {
     atomic_store(&input_stopping, 1);
+    hv_xhci_gamepad_active(board.usb, 0);
     atomic_fetch_add(&pointer_generation, 1);
     /* The bridge excludes new input. Finish a click already in progress and
        discard queued input before releasing the keyboard and mouse. */
@@ -772,6 +775,13 @@ void hv_vm_pointer_reset(void) {
         rctrl_hold(&rctrl_click, 0);
     });
 }
+
+int hv_vm_gamepad_ready(void) { return !atomic_load(&input_stopping) && hv_xhci_gamepad_ready(board.usb); }
+int hv_vm_gamepad(unsigned buttons, int hat, const int axes[6]) {
+    if (atomic_load(&input_stopping)) return -1;
+    return hv_xhci_gamepad(board.usb, buttons, hat, axes);
+}
+void hv_vm_gamepad_cancel(void) { if (!atomic_load(&input_stopping)) hv_xhci_gamepad_cancel(board.usb); }
 
 int hv_vm_pen_ready(void) { return !atomic_load(&input_stopping) && hv_xhci_pen_ready(board.usb); }
 int hv_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags) {

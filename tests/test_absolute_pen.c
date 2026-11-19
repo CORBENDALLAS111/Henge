@@ -38,7 +38,7 @@ static void deliver_pending(HvXhci *x) {
 int main(void) {
     HvXhci *x = hv_xhci_create(NULL, NULL); assert(x);
     assert(!hv_xhci_pen_ready(x) && hv_xhci_pen(x, 1, 1, 1, 0, 0, 0, 5) == -1);
-    assert(HV_XHCI_PORTS == 3 && ((bar_read(&x->pci, 0, XECP + 8, 4) >> 8) & 255) == 3);
+    assert(HV_XHCI_PORTS == 4 && ((bar_read(&x->pci, 0, XECP + 8, 4) >> 8) & 255) == 4);
     x->slots[3].dev = 2; x->slots[3].configured = 1;
     x->slots[3].ep_running[3] = 1;
     x->slots[3].ep[3] = (HvXhciRing){0x1000, 1};

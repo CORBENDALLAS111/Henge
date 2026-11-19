@@ -458,6 +458,24 @@ int henge_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, 
     pthread_rwlock_unlock(&api_lock);
     return result;
 }
+int henge_vm_gamepad_ready(void) {
+    if (!lock_running()) return 0;
+    int ready = hv_vm_gamepad_ready();
+    pthread_rwlock_unlock(&api_lock);
+    return ready;
+}
+int henge_vm_gamepad(unsigned buttons, int hat, const int32_t axes[6]) {
+    if (!lock_running()) return -1;
+    int result = hv_vm_gamepad(buttons, hat, axes);
+    pthread_rwlock_unlock(&api_lock);
+    return result;
+}
+void henge_vm_gamepad_cancel(void) {
+    if (!lock_running()) return;
+    hv_vm_gamepad_cancel();
+    pthread_rwlock_unlock(&api_lock);
+}
+
 void henge_vm_pen_cancel(void) {
     if (!lock_running()) return;
     hv_vm_pen_cancel();
