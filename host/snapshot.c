@@ -596,6 +596,7 @@ int hv_snapshot_save(const char *path, const char *ident, char *err, size_t errl
     HvVmapple *b = hv_vm_board();
     int ncpus = hv_vm_ncpus();
     if (!m || !b || !b->ram || ncpus < 1) return fail(err, errlen, "No machine to save.");
+    if (m->compat_match) return fail(err, errlen, "Experimental Apple Account mode requires a cold boot.");
     if (!hv_vm_pause_clean()) return fail(err, errlen, "The machine is not paused, or has disk work in flight.");
     if (b->vusb) return fail(err, errlen, "An installer cannot be saved.");
     struct timespec t0, t1;
@@ -686,6 +687,7 @@ int hv_snapshot_restore(const char *path, const char *ident, char *err, size_t e
     HvVmapple *b = hv_vm_board();
     int ncpus = hv_vm_ncpus();
     if (!m || !b || !b->ram) return fail(err, errlen, "No machine to restore into.");
+    if (m->compat_match) return fail(err, errlen, "Experimental Apple Account mode requires a cold boot.");
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     int fd = open(path, O_RDONLY);

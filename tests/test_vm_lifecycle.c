@@ -68,6 +68,7 @@ static void *read_ui(void *unused) {
         henge_vm_pointer(&x, &y);
         henge_vm_cpus_on();
         henge_vm_gpu_frames();
+        henge_vm_software_identity_status();
         henge_vm_balloon(-1);
         henge_vm_set_display_layer(NULL);
         if (!henge_vm_boot_display(&pixels, &width, &height, &stride)) henge_vm_free_display(pixels);
@@ -240,11 +241,76 @@ int main(void) {
         check("refused, it can start from cold", henge_vm_state() == 0 && henge_vm_can_start());
         unlink(snap);
     }
+    /* Exercise the app's per-Mac profile through the real native boot bridge.
+       A software identity must survive pause/continue, but never a RAM save. */
+    {
+        char snap[300];
+        snprintf(snap, sizeof snap, "%s/software.hsnap", dir);
+        uint32_t loop = 0x14000000;
+        write_file(rom, &loop, sizeof loop);
+        setenv("HV_SOFTWARE_IDENTITY", "1", 1);
+        setenv("HV_SOFTWARE_SERIAL", "C07KT0FAJYVX", 1);
+        setenv("HV_SOFTWARE_MAC", "02:48:56:12:34:50", 1);
+        setenv("HV_SOFTWARE_MLB", "C07323700J9KXPG1M", 1);
+        int rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error);
+        check("software identity boots through the native bridge", rc == 0);
+        if (!rc) {
+            uint8_t *cfg = hv_vm_board()->cfg;
+            const uint8_t mac[] = {2, 0x48, 0x56, 0x12, 0x34, 0x50};
+            check("software serial reaches the boot ROM", cfg && !memcmp(cfg + 0x500, "C07KT0FAJYVX", 12));
+            for (int i = 0; cfg && i < 4; i++) {
+                uint8_t want[6]; memcpy(want, mac, 6); want[5] ^= i;
+                check("each network identity is stable and distinct", !memcmp(cfg + 0x40 + 8 * i, want, 6));
+            }
+            check("compatibility waits for a verified guest kernel", henge_vm_software_identity_status() == 1);
+            check("board identity is installed before the kernel starts", hv_vm_machine()->compat_boot != NULL);
+            check("software identity can pause", henge_vm_pause(error, sizeof error) == 0);
+            check("paused Mac retains its identity status", henge_vm_software_identity_status() == 1);
+            check("RAM save is refused without creating a file", henge_vm_save(snap, "test", error, sizeof error) != 0
+                && strstr(error, "cold boot") && access(snap, F_OK) != 0);
+            check("software identity continues in memory", henge_vm_continue() == 0 && henge_vm_state() == 1);
+            henge_vm_stop();
+            for (int n = 0; n < 3000 && henge_vm_state() != 2; n++) usleep(1000);
+            check("software Mac stops and releases its status", henge_vm_state() == 2 && henge_vm_software_identity_status() == 0);
+        }
+        setenv("HV_SOFTWARE_MAC", "00:16:cb:12:34:50", 1);
+        rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error);
+        check("public-OUI identity boots through the app's native bridge", rc == 0);
+        if (!rc) {
+            const uint8_t mac[] = {0, 0x16, 0xcb, 0x12, 0x34, 0x50};
+            const uint8_t *cfg = hv_vm_board()->cfg;
+            for (int i = 0; cfg && i < 4; i++) {
+                uint8_t want[6]; memcpy(want, mac, 6); want[5] ^= i;
+                check("new ROM reaches all distinct boot device addresses", !memcmp(cfg + 0x40 + 8 * i, want, 6));
+            }
+            henge_vm_stop();
+            for (int n = 0; n < 3000 && henge_vm_state() != 2; n++) usleep(1000);
+            check("public-OUI machine stops without leaking compatibility state", henge_vm_state() == 2 && henge_vm_software_identity_status() == 0);
+        }
+        const char *invalid_macs[] = {"01:48:56:12:34:50", "2:48:56:12:34:50", "+2:48:56:12:34:50", "02:48:56:12:34:GG", "00:17:cb:12:34:50", "00:00:00:00:00:00"};
+        for (unsigned i = 0; i < sizeof invalid_macs / sizeof *invalid_macs; i++) {
+            setenv("HV_SOFTWARE_MAC", invalid_macs[i], 1);
+            rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error);
+            check("invalid native identity fails before boot and allows retry", rc != 0 && strstr(error, "identity is invalid") && henge_vm_can_start());
+        }
+        setenv("HV_SOFTWARE_MAC", "02:48:56:12:34:50", 1);
+        setenv("HV_SOFTWARE_MLB", "C07323700J9KXPG1H", 1);
+        rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error);
+        check("bad board checksum fails before boot", rc != 0 && henge_vm_can_start());
+        setenv("HV_SOFTWARE_MLB", "C07323700J9KXPG1M", 1);
+        unsetenv("HV_SOFTWARE_IDENTITY"); unsetenv("HV_SOFTWARE_SERIAL");
+        unsetenv("HV_SOFTWARE_MAC"); unsetenv("HV_SOFTWARE_MLB");
+        check("ordinary VM boots after an experimental session", henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error) == 0);
+        check("ordinary VM keeps truthful identity and no hook", !hv_vm_machine()->compat_match && !hv_vm_machine()->compat_boot
+              && henge_vm_software_identity_status() == 0 && !strcmp((char *)hv_vm_board()->cfg + 0x500, "1234"));
+        henge_vm_stop();
+        for (int n = 0; n < 3000 && henge_vm_state() != 2; n++) usleep(1000);
+    }
     hv_vm_destroy();
     atomic_store(&reader_done, 1);
     pthread_join(reader, NULL);
     hv_jit_region_close(&jit);
     unlink(rom); unlink(disk); unlink(aux); rmdir(dir);
-    printf("VM lifecycle: 12 power cycles, 3 failed boots and a suspend/resume, %d failures\n", failures);
+    printf("VM lifecycle: 12 power cycles, 3 failed boots, suspend/resume and experimental identity lifecycle, %d failures\n", failures);
     return failures != 0;
 }
