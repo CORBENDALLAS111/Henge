@@ -118,6 +118,7 @@ int main(void) {
             /* This ROM loops without a virtio driver, so events stay in the
                native ring. Check queue cancellation and frame ordering without
                depending on macOS acceleration or display feedback. */
+            henge_vm_mouse_button(2, 1);
             henge_vm_mouse_button(1, 1); /* may be in its 50 ms Control delay */
             for (int move = 0; move < 200; move++) henge_vm_mouse_move(99, 99);
             henge_vm_pointer_reset();
@@ -149,7 +150,7 @@ int main(void) {
                     uint32_t slot = at % HV_VINPUT_RING;
                     if (mouse->ring[slot].type != HV_EV_KEY) continue;
                     if (mouse->ring[slot].code == HV_BTN_LEFT) left = mouse->ring[slot].value;
-                    if (mouse->ring[slot].code == HV_BTN_MIDDLE) middle = mouse->ring[slot].value;
+                    if (mouse->ring[slot].code == HV_BTN_RIGHT) middle = mouse->ring[slot].value;
                 }
                 check("reset releases guest buttons", !left && !middle);
             }

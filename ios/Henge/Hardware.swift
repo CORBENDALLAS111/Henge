@@ -174,15 +174,15 @@ final class HardwareMouse {
     private var buttons = PhysicalMouseButtons(swapsRightAndMiddle: false)
     private var buttonsLogged = 0
     private var restX: Float = 0, restY: Float = 0
-    private var speed: Float = 1
+    private var inputGeneration = 0
     private var reverse = false
     private var scrollsLogged = 0 // the first few, to see what a device's raw values look like
     private var lastScrollFirst: Float = 0, lastScrollSecond: Float = 0
 
     func start() {
         let defaults = UserDefaults.standard
-        let configuredSpeed = defaults.object(forKey: Self.speedKey) == nil ? 1 : defaults.double(forKey: Self.speedKey)
-        speed = Float(configuredSpeed.isFinite ? min(max(configuredSpeed, 0.1), 10) : 1)
+        inputGeneration += 1
+        HengeLog.log("input", "physical mouse: raw motion; adjust tracking speed in macOS")
         inputActive = true
         restX = 0; restY = 0
         reverse = defaults.bool(forKey: Self.reverseKey)
@@ -214,6 +214,8 @@ final class HardwareMouse {
     }
 
     func stop() {
+        inputGeneration += 1
+        inputActive = false
         PointerLock.set(false)
         releaseButtons()
         observers.forEach(NotificationCenter.default.removeObserver)
@@ -255,18 +257,38 @@ final class HardwareMouse {
         HengeLog.log("input", "touch input paused while a physical mouse is connected")
         HengeLog.log("input", "mouse: \(mouse.vendorName ?? "?"), right button \(input.rightButton != nil), middle \(input.middleButton != nil)")
         let source = ObjectIdentifier(mouse)
-        input.mouseMovedHandler = { [weak self] _, dx, dy in self?.moved(dx, dy) }
-        input.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in self?.button(0, pressed, source: source) }
-        input.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in self?.button(1, pressed, source: source) }
-        input.middleButton?.pressedChangedHandler = { [weak self] _, _, pressed in self?.button(2, pressed, source: source) }
-        input.scroll.valueChangedHandler = { [weak self] _, first, second in self?.scrolled(first, second) }
+        let generation = inputGeneration
+        input.mouseMovedHandler = { [weak self] _, dx, dy in
+            guard let self, self.accepts(source, generation) else { return }
+            self.moved(dx, dy)
+        }
+        input.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard let self, self.accepts(source, generation) else { return }
+            self.button(0, pressed, source: source)
+        }
+        input.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard let self, self.accepts(source, generation) else { return }
+            self.button(1, pressed, source: source)
+        }
+        input.middleButton?.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard let self, self.accepts(source, generation) else { return }
+            self.button(2, pressed, source: source)
+        }
+        input.scroll.valueChangedHandler = { [weak self] _, first, second in
+            guard let self, self.accepts(source, generation) else { return }
+            self.scrolled(first, second)
+        }
+    }
+
+    private func accepts(_ source: ObjectIdentifier, _ generation: Int) -> Bool {
+        inputActive && generation == inputGeneration && mice.contains { ObjectIdentifier($0) == source }
     }
 
     /// GameController's Y runs upward. What doesn't make a whole step yet waits for the next move.
     private func moved(_ dx: Float, _ dy: Float) {
         guard inputActive, dx.isFinite, dy.isFinite else { return }
-        restX += min(max(dx * speed, -32767), 32767)
-        restY -= min(max(dy * speed, -32767), 32767)
+        restX += min(max(dx, -32767), 32767)
+        restY -= min(max(dy, -32767), 32767)
         let x = restX.rounded(), y = restY.rounded()
         guard x != 0 || y != 0 else { return }
         restX -= x

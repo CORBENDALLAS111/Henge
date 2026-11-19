@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var jit = JITCoordinator.shared
     @AppStorage(JITCoordinator.autoEnableKey) private var jitAtLaunch = false
-    @AppStorage(HardwareMouse.speedKey) private var mouseSpeed = 1.0
     @AppStorage(HardwareMouse.reverseKey) private var reverseScrolling = false
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
     @AppStorage(VolumeClicks.inputModeKey) private var inputMode = VolumeClicks.InputMode.touchscreen
@@ -66,10 +65,7 @@ struct SettingsView: View {
                 .listRowBackground(Desk.card)
                 if Device.isPad {
                     Section("Mouse and Trackpad") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Pointer speed")
-                            Slider(value: $mouseSpeed, in: 0.5...3)
-                        }
+                        LabeledContent("Pointer speed", value: "Set in macOS")
                         Toggle("Reverse scrolling", isOn: $reverseScrolling)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Scroll speed")
@@ -78,7 +74,7 @@ struct SettingsView: View {
                         Toggle("Swap physical right and middle buttons", isOn: $swapMouseButtons)
                         Text("Only enable this if your physical mouse's right and middle buttons are reversed in the Mac. Touch controls stay unchanged. Restart the Mac session to apply.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Text("A Magic Keyboard or a Bluetooth mouse moves the Mac's pointer. Pointer speed changes apply the next time a Mac starts; scroll speed changes apply immediately.")
+                        Text("A Magic Keyboard or a Bluetooth mouse moves the Mac's pointer. Change Tracking speed in macOS System Settings so macOS applies its own acceleration. Scroll speed changes here apply immediately.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     .listRowBackground(Desk.card)

@@ -637,6 +637,9 @@ void hv_vm_stop(void) {
    waits. The guest's right Control and left button each have two owners, and stay down while either holds them. */
 #define HID_RIGHT_CONTROL 0xe4
 #define LINUX_KEY_RIGHTCTRL 97
+/* AppleVirtIOInput interprets 0x111 as X11 button 2 (middle), as verified
+   on-device in 278d87c. Linux's BTN_MIDDLE (0x112) becomes a right click. */
+#define GUEST_BTN_MIDDLE HV_BTN_RIGHT
 static os_unfair_lock rctrl_lock = OS_UNFAIR_LOCK_INIT;
 static int rctrl_user, rctrl_click;
 static int left_user, left_click, left_sent; /* only the pointer queue touches these */
@@ -724,7 +727,7 @@ static void button_now(void *ctx) {
             rctrl_hold(&rctrl_click, 0);
         }
     } else if (button == 2) {
-        hv_virtio_input_send(board.mouse, HV_EV_KEY, HV_BTN_MIDDLE, down);
+        hv_virtio_input_send(board.mouse, HV_EV_KEY, GUEST_BTN_MIDDLE, down);
         hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
     }
 }
@@ -744,7 +747,7 @@ void hv_vm_pointer_reset(void) {
         if (atomic_load(&input_stopping)) return;
         left_user = left_click = 0;
         left_update();
-        hv_virtio_input_send(board.mouse, HV_EV_KEY, HV_BTN_MIDDLE, 0);
+        hv_virtio_input_send(board.mouse, HV_EV_KEY, GUEST_BTN_MIDDLE, 0);
         hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
         rctrl_hold(&rctrl_click, 0);
     });
