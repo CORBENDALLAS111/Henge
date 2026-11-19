@@ -117,6 +117,7 @@ jobs:
           build/test_absolute_pen_sample
           make test-absolute-pen
           make test-identity test-jit-advice test-pvg-surfaces
+          make test-legacy-vmm test-legacy-dtree test-compat test-software-identity
           make build/test_dns_lifecycle build/test_pvg_lifecycle
           build/test_dns_lifecycle
           build/test_pvg_lifecycle

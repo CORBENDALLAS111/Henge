@@ -14,6 +14,7 @@ struct SessionView: View {
     @State private var bootAttempt = 0
     @State private var cpusOn: Int32 = 0
     @State private var userCode = false
+    @State private var softwareIdentityStatus: Int32 = 0
     @State private var blocksPerSecond: Double = 0
     @State private var framesOut: UInt64 = 0
     @State private var framesIn: UInt64 = 0
@@ -577,6 +578,16 @@ struct SessionView: View {
                     Text("Less drawing for the emulated CPUs: window and Dock animations, desktop widgets, the screen saver and a moving wallpaper go. Open Terminal on the Mac, tap the button and press Return, then log out and back in. Also turn on Reduce Motion and Reduce Transparency in the Mac's System Settings, Accessibility. Undo puts it back, apart from the wallpaper. Needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                if mac.softwareIdentity != nil {
+                    Section("Apple Account experiment") {
+                        Text(softwareIdentityStatus == 2
+                             ? "Ventura compatibility matched. Account sign-in is not verified."
+                             : userCode ? "Compatibility has not matched this guest. Requires Ventura 13.6 (22G120)."
+                             : "Waiting for Ventura to start.")
+                        Text("This Mac uses its own software identity. Sign in manually in macOS. Instant Resume is unavailable.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Log") {
                     VStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(log.suffix(30).enumerated()), id: \.offset) { _, line in
@@ -606,6 +617,7 @@ struct SessionView: View {
         error = nil
         state = 0
         userCode = false
+        softwareIdentityStatus = 0
         cpusOn = 0
         blocksPerSecond = 0
         framesOut = 0
@@ -632,6 +644,10 @@ struct SessionView: View {
         JITBootstrap.releaseLingeringDebugger()
         Sharing.prepare()
         EngineTuning.apply()
+        guard SoftwareIdentity.prepare(mac.softwareIdentity) else {
+            error = "This Mac's software identity is invalid."
+            return
+        }
         henge_vm_set_display(UInt32(mac.screen.width), UInt32(mac.screen.height))
         if mac.isRetina {
             henge_vm_set_display_mm(UInt32(Device.retinaMM.width), UInt32(Device.retinaMM.height))
@@ -685,6 +701,7 @@ struct SessionView: View {
             }
             cpusOn = henge_vm_cpus_on()
             userCode = userCode || henge_vm_guest_el0() != 0
+            softwareIdentityStatus = henge_vm_software_identity_status()
             let now = Date(), blocks = henge_vm_blocks()
             blocksPerSecond = Double(blocks &- lastBlocks) / max(now.timeIntervalSince(lastTime), 0.001)
             lastBlocks = blocks

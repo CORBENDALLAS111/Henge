@@ -1,6 +1,9 @@
 # Apple services in Henge
 
-Apple Account and Mac App Store login have **not** been verified. The existing
+Apple Account and Mac App Store login have **not** been verified. This branch
+adds an **opt-in experiment for a new Ventura 13.6 (22G120) VM**, described in
+[ventura-account-experiment.md](ventura-account-experiment.md). It is not an
+Apple-supported provisioning path or a confirmed sign-in fix. The existing
 README reports a verification error. The user subsequently supplied a Ventura
 App Store screenshot with the exact message **"MID is invalid."** The catalog
 behind the dialog has loaded, but catalog access does not verify authenticated
@@ -14,8 +17,10 @@ Account details from the screenshot are deliberately not reproduced here.
 of a bad password, missing DNS answer or failed certificate. It does not reveal
 which internal identifier/provisioning check Apple rejected. Henge currently has
 no supported way to provision an Apple-authenticated machine identity for this
-Ventura guest. No local change in this branch repairs or bypasses that rejection,
-and no successful Apple Account or App Store sign-in is claimed. Network repairs
+Ventura guest. The experiment generates an independent software identity and changes selected
+account services' view of the virtual-machine flag in a measured guest kernel.
+Whether that resolves this Ventura rejection is untested; no successful Apple
+Account or App Store sign-in is claimed. Network repairs
 can address a separately demonstrated transport fault; they cannot supply the
 missing service authorization. Preserve the VM's existing auxiliary storage and
 Keychain rather than regenerating identifiers or deleting account state.
