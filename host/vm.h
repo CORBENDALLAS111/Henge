@@ -97,6 +97,7 @@ const char *hv_vm_reason_name(int reason);
 void hv_vm_key(uint16_t code, int down);
 void hv_vm_key_hid(uint8_t usage, int down); /* HID keyboard usage, which is what iOS reports for a hardware keyboard */
 void hv_vm_mouse_move(int dx, int dy);
+void hv_vm_pointer_reset(void); /* discard queued pointer input and release buttons */
 void hv_vm_mouse_button(int button, int down); /* 0 left, 1 right, 2 middle */
 void hv_vm_mouse_wheel(int dy);
 void hv_vm_mouse_hwheel(int dx);

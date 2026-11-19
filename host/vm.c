@@ -637,9 +637,13 @@ void hv_vm_stop(void) {
    waits. The guest's right Control and left button each have two owners, and stay down while either holds them. */
 #define HID_RIGHT_CONTROL 0xe4
 #define LINUX_KEY_RIGHTCTRL 97
+/* AppleVirtIOInput interprets 0x111 as X11 button 2 (middle), as verified
+   on-device in 278d87c. Linux's BTN_MIDDLE (0x112) becomes a right click. */
+#define GUEST_BTN_MIDDLE HV_BTN_RIGHT
 static os_unfair_lock rctrl_lock = OS_UNFAIR_LOCK_INIT;
 static int rctrl_user, rctrl_click;
 static int left_user, left_click, left_sent; /* only the pointer queue touches these */
+static _Atomic uint64_t pointer_generation;
 
 static dispatch_queue_t pointer_queue(void) {
     static dispatch_queue_t q;
@@ -650,6 +654,7 @@ static dispatch_queue_t pointer_queue(void) {
 
 static void stop_pointer(void) {
     atomic_store(&input_stopping, 1);
+    atomic_fetch_add(&pointer_generation, 1);
     /* The bridge excludes new input. Finish a click already in progress and
        discard queued input before releasing the keyboard and mouse. */
     dispatch_sync(pointer_queue(), ^{
@@ -687,8 +692,12 @@ static void move_now(void *ctx) {
 }
 
 void hv_vm_mouse_move(int dx, int dy) {
+    int stopped = atomic_load(&input_stopping);
     int64_t packed = (int64_t)((uint64_t)(uint32_t)dx << 32 | (uint32_t)dy);
-    dispatch_async_f(pointer_queue(), (void *)(intptr_t)packed, move_now);
+    uint64_t generation = atomic_load(&pointer_generation);
+    dispatch_async(pointer_queue(), ^{
+        if (!stopped && generation == atomic_load(&pointer_generation)) move_now((void *)(intptr_t)packed);
+    });
 }
 
 static void left_update(void) {
@@ -699,10 +708,8 @@ static void left_update(void) {
     hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
 }
 
-static void button_now(void *ctx) {
+static void button_now(int button, int down, uint64_t generation) {
     if (atomic_load(&input_stopping)) return;
-    intptr_t v = (intptr_t)ctx;
-    int button = (int)(v >> 1), down = (int)(v & 1);
     if (button == 0) {
         left_user = down;
         left_update();
@@ -710,6 +717,10 @@ static void button_now(void *ctx) {
         if (down) {
             rctrl_hold(&rctrl_click, 1);
             usleep(50000);
+            if (atomic_load(&input_stopping) || generation != atomic_load(&pointer_generation)) {
+                rctrl_hold(&rctrl_click, 0);
+                return;
+            }
         }
         left_click = down;
         left_update();
@@ -718,14 +729,30 @@ static void button_now(void *ctx) {
             rctrl_hold(&rctrl_click, 0);
         }
     } else if (button == 2) {
-        hv_virtio_input_send(board.mouse, HV_EV_KEY, HV_BTN_MIDDLE, down);
+        hv_virtio_input_send(board.mouse, HV_EV_KEY, GUEST_BTN_MIDDLE, down);
         hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
     }
 }
 
 void hv_vm_mouse_button(int button, int down) {
-    if (button < 0 || button > 2) return;
-    dispatch_async_f(pointer_queue(), (void *)(intptr_t)(button << 1 | !!down), button_now);
+    if (button < 0 || button > 2 || atomic_load(&input_stopping)) return;
+    uint64_t generation = atomic_load(&pointer_generation);
+    dispatch_async(pointer_queue(), ^{
+        if (generation == atomic_load(&pointer_generation)) button_now(button, !!down, generation);
+    });
+}
+
+void hv_vm_pointer_reset(void) {
+    if (atomic_load(&input_stopping)) return;
+    atomic_fetch_add(&pointer_generation, 1);
+    dispatch_async(pointer_queue(), ^{
+        if (atomic_load(&input_stopping)) return;
+        left_user = left_click = 0;
+        left_update();
+        hv_virtio_input_send(board.mouse, HV_EV_KEY, GUEST_BTN_MIDDLE, 0);
+        hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
+        rctrl_hold(&rctrl_click, 0);
+    });
 }
 
 /* The guest takes a wheel event as 8 bits: -200 arrives as +56, the wrong way. So big moves go in pieces. */
@@ -738,8 +765,15 @@ static void wheel(uint16_t axis, int amount) {
     }
 }
 
-void hv_vm_mouse_wheel(int dy) { wheel(HV_REL_WHEEL, dy); }
-void hv_vm_mouse_hwheel(int dx) { wheel(HV_REL_HWHEEL, dx); }
+static void queue_wheel(uint16_t axis, int amount) {
+    if (atomic_load(&input_stopping)) return;
+    uint64_t generation = atomic_load(&pointer_generation);
+    dispatch_async(pointer_queue(), ^{
+        if (!atomic_load(&input_stopping) && generation == atomic_load(&pointer_generation)) wheel(axis, amount);
+    });
+}
+void hv_vm_mouse_wheel(int dy) { queue_wheel(HV_REL_WHEEL, dy); }
+void hv_vm_mouse_hwheel(int dx) { queue_wheel(HV_REL_HWHEEL, dx); }
 
 void hv_vm_touch(int id, int phase, int x, int y, uint32_t ts_ms) {
     if (x < 0) x = 0;

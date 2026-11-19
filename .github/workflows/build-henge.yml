@@ -55,12 +55,8 @@ jobs:
       - name: Parse Henge Swift sources
         working-directory: Henge
         run: |
-          xcrun swiftc -frontend -parse \
-            ios/Henge/DirectTouch.swift \
-            ios/Henge/MacSettingsView.swift \
-            ios/Henge/SessionView.swift \
-            ios/Henge/SettingsView.swift \
-            ios/Henge/Machines.swift
+          find ios/Henge ios/HengeJITHelper -name '*.swift' -print0 | xargs -0 xcrun swiftc -frontend -parse
+          bash -n tools/check-apple-services.sh
 
       - name: Cache Husk's sources and prebuilt iOS pieces
         uses: actions/cache@v4
@@ -73,7 +69,7 @@ jobs:
       - name: Install build tools
         run: |
           set -euxo pipefail
-          brew install xcodegen meson ninja pkg-config
+          brew install xcodegen meson ninja pkg-config libslirp
           # Runner images ship rustup; add the iOS target if it's missing.
           rustup target add aarch64-apple-ios || {
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -110,6 +106,18 @@ jobs:
       - name: Build the engine
         working-directory: Henge
         run: make ios-lib
+
+      - name: Validate Swift, native renderer and display compatibility
+        working-directory: Henge
+        run: |
+          bash ios/scripts/check_display.sh
+          xcrun --sdk macosx swiftc ios/Henge/PhysicalMouseButtons.swift tests/test_physical_mouse_buttons.swift -o build/test_physical_mouse_buttons
+          build/test_physical_mouse_buttons
+          make test-identity test-jit-advice test-pvg-surfaces
+          make build/test_dns_lifecycle build/test_pvg_lifecycle
+          build/test_dns_lifecycle
+          build/test_pvg_lifecycle
+          make test-vm-lifecycle
 
       - name: Check iOS Objective-C SDK headers
         working-directory: Henge

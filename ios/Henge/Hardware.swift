@@ -169,17 +169,25 @@ final class HardwareMouse {
 
     private var observers: [NSObjectProtocol] = []
     private var mice: [GCMouse] = []
+    var hasMouse: Bool { !mice.isEmpty }
+    private var inputActive = true
     private var buttons = PhysicalMouseButtons(swapsRightAndMiddle: false)
     private var buttonsLogged = 0
     private var restX: Float = 0, restY: Float = 0
-    private var speed: Float = 1
+    private var inputGeneration = 0
     private var reverse = false
     private var scrollsLogged = 0 // the first few, to see what a device's raw values look like
     private var lastScrollFirst: Float = 0, lastScrollSecond: Float = 0
 
     func start() {
+        // Session appearance and VM startup both call this. Re-registering
+        // would invalidate the callbacks of already attached mice.
+        guard observers.isEmpty else { return }
         let defaults = UserDefaults.standard
-        speed = defaults.object(forKey: Self.speedKey) == nil ? 1 : Float(defaults.double(forKey: Self.speedKey))
+        inputGeneration += 1
+        HengeLog.log("input", "physical mouse: raw motion; adjust tracking speed in macOS")
+        inputActive = true
+        restX = 0; restY = 0
         reverse = defaults.bool(forKey: Self.reverseKey)
         releaseButtons()
         let swapButtons = defaults.bool(forKey: PhysicalMouseButtons.swapKey)
@@ -194,8 +202,10 @@ final class HardwareMouse {
         })
         observers.append(NotificationCenter.default.addObserver(forName: .GCMouseDidDisconnect, object: nil, queue: .main) { [weak self] note in
             guard let self, let mouse = note.object as? GCMouse else { return }
-            self.releaseButtons()
+            for button in self.buttons.disconnect(ObjectIdentifier(mouse)) { henge_vm_mouse_button(button, 0) }
+            self.detach(mouse)
             self.mice.removeAll { $0 === mouse }
+            NotificationCenter.default.post(name: TouchInputSafety.reset, object: nil)
         })
         observers.append(NotificationCenter.default.addObserver(forName: UIPointerLockState.didChangeNotification, object: nil, queue: .main) { note in
             // The scene comes in the user info: the notification's object isn't it.
@@ -207,40 +217,81 @@ final class HardwareMouse {
     }
 
     func stop() {
+        inputGeneration += 1
+        inputActive = false
         PointerLock.set(false)
         releaseButtons()
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
         for mouse in mice {
-            guard let input = mouse.mouseInput else { continue }
-            input.mouseMovedHandler = nil
-            input.leftButton.pressedChangedHandler = nil
-            input.rightButton?.pressedChangedHandler = nil
-            input.middleButton?.pressedChangedHandler = nil
-            input.scroll.valueChangedHandler = nil
+            detach(mouse)
         }
         mice.removeAll()
     }
 
     func releaseButtons() {
         for button in buttons.releaseAll() { henge_vm_mouse_button(button, 0) }
+        restX = 0; restY = 0
+        lastScrollFirst = 0; lastScrollSecond = 0
+    }
+
+    func setActive(_ active: Bool) {
+        if !active { releaseButtons() }
+        inputActive = active
+    }
+
+    private func detach(_ mouse: GCMouse) {
+        guard let input = mouse.mouseInput else { return }
+        input.mouseMovedHandler = nil
+        input.leftButton.pressedChangedHandler = nil
+        input.rightButton?.pressedChangedHandler = nil
+        input.middleButton?.pressedChangedHandler = nil
+        input.scroll.valueChangedHandler = nil
     }
 
     private func attach(_ mouse: GCMouse) {
         guard let input = mouse.mouseInput, !mice.contains(where: { $0 === mouse }) else { return }
         mice.append(mouse)
+        mouse.handlerQueue = .main
+        releaseButtons()
+        NotificationCenter.default.post(name: TouchInputSafety.reset, object: nil)
+        VolumeClicks.shared.releaseButtons()
+        henge_vm_pointer_reset()
+        HengeLog.log("input", "touch input paused while a physical mouse is connected")
         HengeLog.log("input", "mouse: \(mouse.vendorName ?? "?"), right button \(input.rightButton != nil), middle \(input.middleButton != nil)")
-        input.mouseMovedHandler = { [weak self] _, dx, dy in self?.moved(dx, dy) }
-        input.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in self?.button(0, pressed) }
-        input.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in self?.button(1, pressed) }
-        input.middleButton?.pressedChangedHandler = { [weak self] _, _, pressed in self?.button(2, pressed) }
-        input.scroll.valueChangedHandler = { [weak self] _, first, second in self?.scrolled(first, second) }
+        let source = ObjectIdentifier(mouse)
+        let generation = inputGeneration
+        input.mouseMovedHandler = { [weak self] _, dx, dy in
+            guard let self, self.accepts(source, generation) else { return }
+            self.moved(dx, dy)
+        }
+        input.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard let self, self.accepts(source, generation) else { return }
+            self.button(0, pressed, source: source)
+        }
+        input.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard let self, self.accepts(source, generation) else { return }
+            self.button(1, pressed, source: source)
+        }
+        input.middleButton?.pressedChangedHandler = { [weak self] _, _, pressed in
+            guard let self, self.accepts(source, generation) else { return }
+            self.button(2, pressed, source: source)
+        }
+        input.scroll.valueChangedHandler = { [weak self] _, first, second in
+            guard let self, self.accepts(source, generation) else { return }
+            self.scrolled(first, second)
+        }
+    }
+
+    private func accepts(_ source: ObjectIdentifier, _ generation: Int) -> Bool {
+        inputActive && generation == inputGeneration && mice.contains { ObjectIdentifier($0) == source }
     }
 
     /// GameController's Y runs upward. What doesn't make a whole step yet waits for the next move.
     private func moved(_ dx: Float, _ dy: Float) {
-        restX += dx * speed
-        restY -= dy * speed
+        guard inputActive, dx.isFinite, dy.isFinite else { return }
+        restX += min(max(dx, -32767), 32767)
+        restY -= min(max(dy, -32767), 32767)
         let x = restX.rounded(), y = restY.rounded()
         guard x != 0 || y != 0 else { return }
         restX -= x
@@ -248,8 +299,9 @@ final class HardwareMouse {
         henge_vm_mouse_move(Int32(x), Int32(y))
     }
 
-    private func button(_ physicalButton: Int32, _ pressed: Bool) {
-        guard let guestButton = buttons.event(physicalButton, pressed: pressed) else { return }
+    private func button(_ physicalButton: Int32, _ pressed: Bool, source: ObjectIdentifier) {
+        guard inputActive else { return }
+        guard let guestButton = buttons.event(physicalButton, pressed: pressed, source: source) else { return }
         if buttonsLogged < 32 {
             buttonsLogged += 1
             HengeLog.log("input", "physical mouse button: raw=\(physicalButton) guest=\(guestButton) \(pressed ? "down" : "up")")
@@ -262,6 +314,7 @@ final class HardwareMouse {
     /// macOS accelerates wheel units roughly quadratically, so use a tunable square root
     /// and cap each event to keep a small pad gesture from jumping across a page.
     private func scrolled(_ first: Float, _ second: Float) {
+        guard inputActive, first.isFinite, second.isFinite else { return }
         // GameController reports both axis states when either one changes. On a
         // Magic Keyboard it calls us twice per movement, with one stale axis in
         // each call; sending both values doubles the scroll and adds sideways drift.

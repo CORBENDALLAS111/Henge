@@ -51,6 +51,18 @@ struct SessionView: View {
     @Environment(\.scenePhase) private var scenePhase
 
 
+    private var touchInputActive: Bool {
+        scenePhase == .active && state == 1 && !showDetails && !confirmStop && error == nil
+    }
+
+    private func resetPointerInput() {
+        NotificationCenter.default.post(name: TouchInputSafety.reset, object: nil)
+        HardwareMouse.shared.releaseButtons()
+        VolumeClicks.shared.releaseButtons()
+        StickyKeys.shared.releaseAll()
+        henge_vm_pointer_reset()
+    }
+
     var body: some View {
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
@@ -86,22 +98,9 @@ struct SessionView: View {
                     }
                     .position(x: layout.screen.midX, y: layout.screen.midY)
                 if state != 2 {
-                    Trackpad()
+                    Trackpad(isActive: touchInputActive)
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
-                    if touchMode == "direct" && !display.isExternal {
-                        // Above the trackpad hit surface, but only on the visible Mac pixels.
-                        // Portrait's separate trackpad panel remains usable for fine control.
-                        DirectTouchSurface(
-                            guestWidth: mac.screen.width,
-                            guestHeight: mac.screen.height,
-                            isActive: scenePhase == .active && state == 1 &&
-                                !showDetails && !confirmStop && error == nil
-                        )
-                            .frame(width: layout.screen.width, height: layout.screen.height)
-                            .position(x: layout.screen.midX, y: layout.screen.midY)
-                            .accessibilityLabel("Direct Mac touch surface")
-                    }
                     if inputMode == .volumeButtons && volumeMode == .intercept {
                         // The capture interaction must live in the SwiftUI hierarchy to receive
                         // the volume-button events; it passes touches through to the trackpad.
@@ -189,6 +188,10 @@ struct SessionView: View {
             zoomFollowing = on ? Task { await followPointer() } : nil
         }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
+        .onChange(of: touchMode) { _ in resetPointerInput() }
+        .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
+        .onChange(of: inputMode) { _ in resetPointerInput() }
+        .onChange(of: display.isExternal) { _ in resetPointerInput() }
         .onChange(of: scenePhase) { phase in
             guard phase != .active else {
                 display.refresh()
@@ -196,20 +199,20 @@ struct SessionView: View {
                 return
             }
             HardwareKeys.releaseAll()
-            HardwareMouse.shared.releaseButtons()
-            VolumeClicks.shared.releaseButtons()
+            resetPointerInput()
             if phase == .inactive { InstantResume.pause() }
             if phase == .background && bootRAM > 0 { InstantResume.suspend(mac, ramMB: bootRAM, cpus: cpus) }
         }
         .onChange(of: showDetails) { showing in
-            if showing { HardwareKeys.releaseAll(); StickyKeys.shared.releaseAll() }
+            if showing { HardwareKeys.releaseAll(); resetPointerInput() }
         }
         .onChange(of: confirmStop) { showing in
-            if showing { HardwareKeys.releaseAll(); StickyKeys.shared.releaseAll() }
+            if showing { HardwareKeys.releaseAll(); resetPointerInput() }
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
             HardwareMouse.shared.start()
+            HardwareMouse.shared.setActive(touchInputActive)
             VolumeClicks.shared.start()
         }
         .onDisappear {
@@ -217,6 +220,7 @@ struct SessionView: View {
             zoomFollowing?.cancel()
             StickyKeys.shared.releaseAll()
             HardwareKeys.releaseAll()
+            resetPointerInput()
             HardwareMouse.shared.stop()
             VolumeClicks.shared.stop()
         }
@@ -328,7 +332,7 @@ struct SessionView: View {
         let compact = layout.pad.height < 260
         return VStack(spacing: 0) {
             ZStack {
-                Trackpad()
+                Trackpad(isActive: touchInputActive)
                 if compact {
                     Text("Trackpad").font(.system(size: 14)).foregroundStyle(Desk.faint).allowsHitTesting(false)
                 } else {
@@ -513,12 +517,11 @@ struct SessionView: View {
                 Section("Touch Controls") {
                     Picker("Mode", selection: $touchMode) {
                         Text("Trackpad").tag("trackpad")
-                        Text("Direct Touch").tag("direct")
+                        Text("Direct Touch (fallback)").tag("direct")
                     }
                     .pickerStyle(.segmented)
-                    Text(display.isExternal
-                         ? "Direct Touch is unavailable on an external monitor. The device remains a trackpad."
-                         : "In Direct Touch, tap an item to click, drag or hold to pick it up, and use two fingers to scroll or pinch. Four-finger tap reveals hidden controls. Switching modes is immediate.")
+                    Text(touchMode == "direct" ? TouchInputSafety.fallbackDescription
+                         : "Swipe to move the pointer; tap to click, hold then move to drag. Touch input pauses while a physical mouse is connected.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Pointer") {
@@ -696,6 +699,7 @@ struct SessionView: View {
                 zoomFollowing?.cancel()
                 StickyKeys.shared.releaseAll()
                 HardwareKeys.releaseAll()
+                resetPointerInput()
                 HardwareMouse.shared.stop()
                 UIApplication.shared.isIdleTimerDisabled = false
                 HengeLog.log("session", "showing stopped Mac: \(String(cString: henge_vm_exit_reason()))")

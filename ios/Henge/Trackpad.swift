@@ -14,11 +14,13 @@ import UIKit
 ///    volume keys (VolumeClicks), so a tap here does nothing.
 /// Only fingers count: a real trackpad or mouse goes through HardwareMouse.
 struct Trackpad: UIViewRepresentable {
+    var isActive = true
     /// Four fingers tapped together: the session shows its hidden controls.
     static let revealTap = Notification.Name("henge.trackpad.revealTap")
 
     func makeUIView(context: Context) -> Surface { Surface() }
-    func updateUIView(_ view: Surface, context: Context) {}
+    func updateUIView(_ view: Surface, context: Context) { view.setActive(isActive) }
+    static func dismantleUIView(_ view: Surface, coordinator: ()) { view.reset() }
 
     final class Surface: UIView, UIPointerInteractionDelegate {
         /// The emulated pad's sensor, in the Magic Trackpad 2's own units.
@@ -36,6 +38,8 @@ struct Trackpad: UIViewRepresentable {
         private var travelled: CGFloat = 0
         private var mostFingers = 0
         private var touchesLogged = 0
+        private var resetObserver: NSObjectProtocol?
+        private var acceptsTouches = true
 
         /* Touchscreen-mode clicking. */
         private var holding = false
@@ -48,6 +52,31 @@ struct Trackpad: UIViewRepresentable {
             isMultipleTouchEnabled = true
             backgroundColor = .clear
             addInteraction(UIPointerInteraction(delegate: self))
+            resetObserver = NotificationCenter.default.addObserver(forName: TouchInputSafety.reset, object: nil, queue: .main) { [weak self] _ in self?.reset() }
+        }
+
+        deinit {
+            if let resetObserver { NotificationCenter.default.removeObserver(resetObserver) }
+            holdTimer?.invalidate()
+        }
+
+        func setActive(_ active: Bool) {
+            if !active { reset() }
+            acceptsTouches = active
+            isUserInteractionEnabled = active
+        }
+
+        func reset() {
+            cancelHold()
+            if holding { henge_vm_mouse_button(0, 0) }
+            holding = false
+            let ts = Self.ms(ProcessInfo.processInfo.systemUptime)
+            for finger in fingers { henge_vm_touch(finger.id, 2, 0, 0, ts) }
+            if !fingers.isEmpty { henge_vm_touch_frame(ts) }
+            fingers.removeAll()
+            freeIds = Set<Int32>(1...5)
+            mostFingers = 0
+            travelled = 0
         }
 
         /// Over the Mac there is only the Mac's pointer, if iPadOS hasn't locked its own away.
@@ -77,6 +106,7 @@ struct Trackpad: UIViewRepresentable {
         private static func ms(_ t: TimeInterval) -> UInt32 { UInt32(truncatingIfNeeded: Int(t * 1000)) }
 
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard acceptsTouches, !HardwareMouse.shared.hasMouse else { return }
             let touches = touches.filter { $0.type != .indirectPointer }
             guard !touches.isEmpty else { return }
             if fingers.isEmpty {
@@ -128,7 +158,7 @@ struct Trackpad: UIViewRepresentable {
         }
 
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches) }
-        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches) }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { reset() }
 
         private func lift(_ touches: Set<UITouch>) {
             var lifted: [Int32] = []
