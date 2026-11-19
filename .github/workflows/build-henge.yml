@@ -64,6 +64,12 @@ jobs:
         working-directory: Henge
         run: make test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
+      - name: Build and verify the macOS sample disk image
+        working-directory: Henge
+        run: |
+          make build/tl-samples.dmg
+          hdiutil verify build/tl-samples.dmg
+
       - name: Cache Husk's sources and prebuilt iOS pieces
         uses: actions/cache@v4
         with:
