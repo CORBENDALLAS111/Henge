@@ -114,6 +114,19 @@ static void test_invalid_mapping(id<MTLDevice> device) {
     assert(![r exec:args length:sizeof args channel:0 stamp:1]);
 }
 
+static void test_surface_identity(void) {
+    HvObject *s = [HvObject new];
+    s->fourcc = '420v'; s->surface_w = 64; s->surface_h = 4; s->alloc = 384;
+    uint32_t pages[] = {0x10001, 0x10005}, other_pages[] = {0x10001, 0x10009};
+    NSData *key = surface_key(s, pages, 2);
+    assert([key isEqual:surface_key(s, pages, 2)]);
+    assert(![key isEqual:surface_key(s, other_pages, 2)]);
+    s->first = 256;
+    assert(![key isEqual:surface_key(s, pages, 2)]);
+    s->first = 0; s->plane_row[1] = 64;
+    assert(![key isEqual:surface_key(s, pages, 2)]);
+}
+
 int main(void) {
     alarm(30);
     @autoreleasepool {
@@ -122,8 +135,8 @@ int main(void) {
         for (unsigned i = 0; i < sizeof bytes; i++) {
             bytes[i] = 1; assert(hash_bytes(bytes, sizeof bytes) != initial); bytes[i] = 0;
         }
-        test_view_reuse(device); test_planes(device); test_invalid_mapping(device);
-        puts("PASS: every-byte updates, dirty-plane preservation, upload fence, invalid plane, reused parent views, invalid mapping rejection");
+        test_view_reuse(device); test_planes(device); test_invalid_mapping(device); test_surface_identity();
+        puts("PASS: every-byte updates, dirty-plane preservation, upload fence, invalid plane, reused parent views, invalid mapping rejection, complete backing identity");
     }
     return 0;
 }

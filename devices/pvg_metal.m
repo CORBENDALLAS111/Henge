@@ -117,7 +117,7 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
     HvObject *parent;
     uint32_t parent_ref; /* recreate children when this guest ref names a new object */
     /* A multi-plane surface's key in the replay's planar table, while it counts as one of its users. */
-    NSString *planar_key;
+    NSData *planar_key;
 }
 @end
 
@@ -144,9 +144,9 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
     /* Multi-plane surfaces' host IOSurfaces by the guest memory they stand for: each process maps a surface
        under its own mapping id, and what one draws (macOS 27's WebKit draws pages into b3a8 tiles in its GPU
        process) has to be what another reads (WindowServer). */
-    NSMutableDictionary<NSString *, id> *planar;
-    NSMutableDictionary<NSString *, NSNumber *> *planar_uses; /* mappings using each: the entry goes with the last one */
-    NSMutableDictionary<NSString *, HvSurfaceSync *> *planar_sync; /* and what its planes held when last copied */
+    NSMutableDictionary<NSData *, id> *planar;
+    NSMutableDictionary<NSData *, NSNumber *> *planar_uses; /* mappings using each: the entry goes with the last one */
+    NSMutableDictionary<NSData *, HvSurfaceSync *> *planar_sync; /* and what its planes held when last copied */
     NSMutableSet<NSString *> *complaints;
     uint64_t execs, draws, failed, heap_bytes, synced, remaps;
     /* Work the GPU has not finished. Stamps are given back in the order they came: the
@@ -937,6 +937,20 @@ static void sync_iosurface(HvObject *s) {
     }
 }
 
+/* Sharing requires the entire guest backing and layout to match. A first
+   physical page alone is insufficient: suballocations can start at different
+   offsets in that page, and their remaining page lists can differ. */
+static NSData *surface_key(HvObject *s, const uint32_t *pages, uint64_t count) {
+    uint64_t fields[] = {s->fourcc, s->surface_w, s->surface_h, s->alloc,
+                         s->first, s->row, s->plane_count};
+    NSMutableData *key = [NSMutableData dataWithBytes:fields length:sizeof fields];
+    [key appendBytes:s->plane_from length:sizeof s->plane_from];
+    [key appendBytes:s->plane_row length:sizeof s->plane_row];
+    [key appendBytes:s->plane_h length:sizeof s->plane_h];
+    [key appendBytes:pages length:(NSUInteger)count * sizeof *pages];
+    return [key copy];
+}
+
 /* A surface (IOSurface in the guest): a texture over its guest pages, so the
    guest's CPU and the GPU see the same pixels, as they do through a real one.
    {mapping id, tag, size, ref, description}. Its descriptor: page list at +0
@@ -1009,8 +1023,7 @@ static void sync_iosurface(HvObject *s) {
            the hashes it shares: a video decoder's process writes frames with the CPU and never uses the GPU, so
            nothing had copied them, and the first process to draw with one (the wallpaper's lock-screen image
            during Setup) read an empty frame: solid green. */
-        NSString *pk = [NSString stringWithFormat:@"%x/%08x/%llux%llu/%llu", pages[0] & ~1u, surface->fourcc,
-                        (unsigned long long)sw, (unsigned long long)sh, (unsigned long long)alloc];
+        NSData *pk = surface_key(surface, pages, n);
         id shared = planar[pk];
         if (shared && made) {
             CFRelease(made);
@@ -1019,7 +1032,7 @@ static void sync_iosurface(HvObject *s) {
             surface->planar_key = pk;
             planar_uses[pk] = @(planar_uses[pk].unsignedIntValue + 1);
             static int told;
-            if (told++ < 8) fprintf(stderr, "hengevm: pvg-metal: surface %llu shares the host surface of the same guest memory (%s)\n", mapping, pk.UTF8String);
+            if (told++ < 8) fprintf(stderr, "hengevm: pvg-metal: surface %llu shares a host surface with matching guest pages and layout\n", mapping);
         } else {
             surface->iosurface = made;
             if (made) {
@@ -2907,7 +2920,7 @@ void hv_pvg_metal_unmap(HvPvgMetal *m, uint32_t mapping) {
         /* The last mapping of a shared multi-plane surface takes its table entry along: the entry holds the host
            IOSurface (4K video frames are 27-65 MB of Henge's own memory), and the guest reuses its memory for others. */
         HvObject *s = r->surfaces[@(mapping)];
-        NSString *pk = s ? s->planar_key : nil;
+        NSData *pk = s ? s->planar_key : nil;
         if (pk) {
             s->planar_key = nil;
             if ((__bridge IOSurfaceRef)r->planar[pk] == s->iosurface) { /* still this one's entry (the table may have been emptied since) */

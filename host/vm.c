@@ -708,10 +708,8 @@ static void left_update(void) {
     hv_virtio_input_send(board.mouse, HV_EV_SYN, 0, 0);
 }
 
-static void button_now(void *ctx) {
+static void button_now(int button, int down, uint64_t generation) {
     if (atomic_load(&input_stopping)) return;
-    intptr_t v = (intptr_t)ctx;
-    int button = (int)(v >> 1), down = (int)(v & 1);
     if (button == 0) {
         left_user = down;
         left_update();
@@ -719,6 +717,10 @@ static void button_now(void *ctx) {
         if (down) {
             rctrl_hold(&rctrl_click, 1);
             usleep(50000);
+            if (atomic_load(&input_stopping) || generation != atomic_load(&pointer_generation)) {
+                rctrl_hold(&rctrl_click, 0);
+                return;
+            }
         }
         left_click = down;
         left_update();
@@ -736,7 +738,7 @@ void hv_vm_mouse_button(int button, int down) {
     if (button < 0 || button > 2 || atomic_load(&input_stopping)) return;
     uint64_t generation = atomic_load(&pointer_generation);
     dispatch_async(pointer_queue(), ^{
-        if (generation == atomic_load(&pointer_generation)) button_now((void *)(intptr_t)(button << 1 | !!down));
+        if (generation == atomic_load(&pointer_generation)) button_now(button, !!down, generation);
     });
 }
 
