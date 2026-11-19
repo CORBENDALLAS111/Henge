@@ -89,6 +89,11 @@ void henge_vm_key(uint16_t code, int down);
 void henge_vm_key_hid(uint8_t usage, int down); /* a hardware keyboard: iOS gives each key's HID usage */
 void henge_vm_mouse_move(int dx, int dy);
 void henge_vm_pointer_reset(void);
+int henge_vm_pen_ready(void);
+/* HID units: XY 0..32767; pressure 0..4095; tilt hundredths of degrees;
+   twist hundredths of degrees 0..35999. flags tip=1, barrel=2, range=4, invert=8. */
+int henge_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags);
+void henge_vm_pen_cancel(void);
 void henge_vm_mouse_button(int button, int down);
 /* Wheel units: dy > 0 up, dx > 0 right. */
 void henge_vm_mouse_scroll(int dx, int dy);

@@ -110,6 +110,13 @@ test-pvg-surfaces: $(B)/test_pvg_surfaces
 	$(B)/test_pvg_surfaces
 .PHONY: test-pvg-surfaces
 
+$(B)/test_absolute_pen: tests/test_absolute_pen.c devices/xhci.c devices/xhci.h devices/absolute_pen.h | $(B)
+	$(CC) $(CFLAGS) -pthread tests/test_absolute_pen.c -o $@
+
+test-absolute-pen: $(B)/test_absolute_pen
+	$(B)/test_absolute_pen
+.PHONY: test-absolute-pen
+
 $(B)/hvsparse: tools/hvsparse_main.c host/hvsparse.c host/hvsparse.h | $(B)
 	$(CC) $(CFLAGS) tools/hvsparse_main.c host/hvsparse.c -o $@
 

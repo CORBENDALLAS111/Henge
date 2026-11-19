@@ -405,6 +405,23 @@ void henge_vm_pointer_reset(void) {
     hv_vm_pointer_reset();
     pthread_rwlock_unlock(&api_lock);
 }
+int henge_vm_pen_ready(void) {
+    if (!lock_running()) return 0;
+    int ready = hv_vm_pen_ready();
+    pthread_rwlock_unlock(&api_lock);
+    return ready;
+}
+int henge_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags) {
+    if (!lock_running()) return -1;
+    int result = hv_vm_pen(x, y, pressure, tilt_x, tilt_y, twist, flags);
+    pthread_rwlock_unlock(&api_lock);
+    return result;
+}
+void henge_vm_pen_cancel(void) {
+    if (!lock_running()) return;
+    hv_vm_pen_cancel();
+    pthread_rwlock_unlock(&api_lock);
+}
 void henge_vm_mouse_button(int button, int down) {
     if (!lock_running()) return;
     hv_vm_mouse_button(button, down);
