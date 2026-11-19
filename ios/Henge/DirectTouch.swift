@@ -26,6 +26,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var lastHover: CGPoint?
         private var lastHoverTime: TimeInterval = 0
         private var lastAction: TimeInterval = 0
+        private var previousSize: CGSize?
         private var observer: NSObjectProtocol?
         private let gestures = Trackpad.Surface()
         private let status = UILabel()
@@ -56,6 +57,8 @@ struct DirectTouchSurface: UIViewRepresentable {
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; pendingDown?.cancel() }
         override func layoutSubviews() {
             super.layoutSubviews()
+            if let previousSize, previousSize != bounds.size { reset() }
+            previousSize = bounds.size
             gestures.frame = bounds
             status.frame = CGRect(x: 8, y: max(bounds.height - 48, 0), width: max(bounds.width - 16, 0), height: 40)
         }
@@ -194,7 +197,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             if preferred == .switchEraser || preferred == .switchPrevious {
                 eraser.toggle()
                 henge_vm_pen_cancel() // new proximity event updates the guest's pen/eraser identity
-                if let p = point ?? lastHover { send(p, flags: 4 | (eraser ? 8 : 0)) }
+                if let p = point ?? lastHover, bounds.contains(p) { send(p, flags: 4 | (eraser ? 8 : 0)) }
                 updateStatus()
                 return
             }

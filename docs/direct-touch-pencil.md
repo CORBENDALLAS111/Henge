@@ -32,7 +32,7 @@ a port bitmask (the distinction matters when adding the third port).
   proprietary drawing-tool palette cannot be controlled through standard HID.
 - Connecting a physical mouse pauses direct touch, Pencil and touchscreen
   trackpad input. Switching modes, backgrounding, cancellation and ownership
-  changes discard queued motion and release contact **at the last position
+  changes and view resizing discard queued motion and release contact **at the last position
   delivered to the guest**, then leave proximity. Up is sent while still in
   range because macOS does not dispatch absolute pointer edges outside range.
 - The bounded queue preserves button/proximity transitions while coalescing
