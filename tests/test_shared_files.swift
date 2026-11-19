@@ -2,9 +2,9 @@ import Foundation
 
 @main struct SharedFileTests {
     static func main() throws {
-        func check(_ value: @autoclosure () throws -> Bool, _ message: String = "") throws {
+        func check(_ value: @autoclosure () throws -> Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) throws {
             let passed = try value()
-            precondition(passed, message)
+            precondition(passed, message, file: file, line: line)
         }
         let fm = FileManager.default
         let temporary = fm.temporaryDirectory.appendingPathComponent("henge-file-test-" + UUID().uuidString, isDirectory: true)
@@ -38,7 +38,8 @@ import Foundation
         let copiedFolder = try store.importFile(folder)
         try check(store.entries(in: copiedFolder).map(\.name) == ["файл.txt"])
         let nested = try store.importFile(source, into: copiedFolder)
-        try check(nested.deletingLastPathComponent() == copiedFolder)
+        try check(nested.deletingLastPathComponent() == copiedFolder,
+                  "nested parent \(nested.deletingLastPathComponent().absoluteString) != imported folder \(copiedFolder.absoluteString)")
         try check(store.importFile(nested, into: copiedFolder) == nested, "an in-folder drop is idempotent even through /var path aliases")
         refused { _ = try store.importFile(source, into: temporary) }
         let link = folder.appendingPathComponent("outside-link")
