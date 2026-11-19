@@ -58,6 +58,18 @@ jobs:
           find ios/Henge ios/HengeJITHelper -name '*.swift' -print0 | xargs -0 xcrun swiftc -frontend -parse
           bash -n tools/check-apple-services.sh
 
+      # These fixtures need only the runner's Xcode, not the restore/dependency
+      # stack. Fail here before rebuilding third-party libraries.
+      - name: Validate standalone input and file logic
+        working-directory: Henge
+        run: make test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
+
+      - name: Build and verify the macOS sample disk image
+        working-directory: Henge
+        run: |
+          make build/tl-samples.dmg
+          hdiutil verify build/tl-samples.dmg
+
       - name: Cache Husk's sources and prebuilt iOS pieces
         uses: actions/cache@v4
         with:
@@ -115,7 +127,6 @@ jobs:
           build/test_physical_mouse_buttons
           xcrun --sdk macosx swiftc ios/Henge/AbsolutePenSample.swift tests/test_absolute_pen_sample.swift -o build/test_absolute_pen_sample
           build/test_absolute_pen_sample
-          make test-absolute-pen
           make test-identity test-jit-advice test-pvg-surfaces
           make test-legacy-vmm test-legacy-dtree test-compat test-software-identity
           make build/test_dns_lifecycle build/test_pvg_lifecycle

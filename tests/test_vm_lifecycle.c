@@ -69,6 +69,7 @@ static void *read_ui(void *unused) {
         henge_vm_cpus_on();
         henge_vm_gpu_frames();
         henge_vm_software_identity_status();
+        henge_vm_gamepad_ready();
         henge_vm_balloon(-1);
         henge_vm_set_display_layer(NULL);
         if (!henge_vm_boot_display(&pixels, &width, &height, &stride)) henge_vm_free_display(pixels);
@@ -196,7 +197,12 @@ int main(void) {
         uint64_t c1 = *count;
         usleep(20000);
         check("paused: the counter stands still", c1 > 0 && *count == c1);
+        HvXhci *usb = hv_vm_board()->usb;
+        pthread_mutex_lock(&usb->mu);
+        usb->gamepad.state[0] = 1;
+        pthread_mutex_unlock(&usb->mu);
         check("continue runs it on", henge_vm_continue() == 0 && henge_vm_state() == 1);
+        check("continue releases saved controller controls", usb->gamepad.state[0] == 0 && usb->gamepad.state[2] == 8);
         for (int n = 0; n < 1000 && *count == c1; n++) usleep(1000);
         check("continued: the counter moves", *count > c1);
         rc = henge_vm_suspend(snap, "test", error, sizeof error);

@@ -5,6 +5,13 @@ import CoreGraphics
 struct AbsolutePenSample {
     let x: Int32, y: Int32, pressure: Int32, tiltX: Int32, tiltY: Int32, twist: Int32, flags: Int32
 
+    /// The image may be letterboxed or enlarged/cropped inside the input view.
+    init(point: CGPoint, imageFrame: CGRect, pressure: CGFloat, altitude: CGFloat = .pi / 2,
+         azimuth: CGFloat = 0, roll: CGFloat = 0, flags: Int32) {
+        self.init(point: CGPoint(x: point.x - imageFrame.minX, y: point.y - imageFrame.minY), size: imageFrame.size,
+                  pressure: pressure, altitude: altitude, azimuth: azimuth, roll: roll, flags: flags)
+    }
+
     init(point: CGPoint, size: CGSize, pressure: CGFloat, altitude: CGFloat = .pi / 2,
          azimuth: CGFloat = 0, roll: CGFloat = 0, flags: Int32) {
         func units(_ value: CGFloat, max: CGFloat) -> Int32 {

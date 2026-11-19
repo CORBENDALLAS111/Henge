@@ -143,10 +143,20 @@ static const uint8_t pen_config_desc[34] = {
     7,5,0x81,3,64,0,HV_PEN_INTERVAL_MS
 };
 static const char *const pen_strings[] = {NULL,"HengeVM","Henge Absolute Pen","1"};
+static const uint8_t gp_device_desc[18] = {
+    18,1,0,2,0,0,0,64, 0x09,0x12,0x02,0, 0,1,1,2,3,1
+};
+static const uint8_t gp_config_desc[34] = {
+    9,2,34,0,1,1,0,0x80,50, 9,4,0,0,1,3,0,0,0,
+    9,0x21,0x11,1,0,1,0x22,sizeof hv_gp_descriptor,0,
+    7,5,0x81,3,64,0,HV_GP_INTERVAL_MS
+};
+static const char *const gp_strings[] = {NULL,"HengeVM","Henge USB Gamepad","1"};
 static const struct HvXhciDev devs[HV_XHCI_DEVICES] = {
     {kbd_strings, kbd_device_desc, kbd_config_desc, kbd_report_desc, sizeof kbd_report_desc},
     {tp_strings, tp_device_desc, tp_config_desc, tp_report_desc, sizeof tp_report_desc},
     {pen_strings, pen_device_desc, pen_config_desc, hv_pen_descriptor, sizeof hv_pen_descriptor},
+    {gp_strings, gp_device_desc, gp_config_desc, hv_gp_descriptor, sizeof hv_gp_descriptor},
 };
 
 /* USB reset/unconfiguration discards the device's old report state. Host input
@@ -166,6 +176,17 @@ static void pen_detach(HvXhci *x) {
 static void pen_pause(HvXhci *x) {
     atomic_store(&x->pen_ready, 0);
     hv_xhci_pen_cancel(x);
+}
+
+static void gamepad_detach(HvXhci *x) {
+    pthread_mutex_lock(&x->mu);
+    atomic_store(&x->gamepad_ready, 0);
+    hv_gp_reset(&x->gamepad);
+    pthread_mutex_unlock(&x->mu);
+}
+static void gamepad_pause(HvXhci *x) {
+    atomic_store(&x->gamepad_ready, 0);
+    hv_xhci_gamepad_cancel(x);
 }
 
 static int xlog(void) {
@@ -398,6 +419,7 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
     } else if (type == 0x00 && req == 9) { /* SET_CONFIGURATION */
         x->slots[slot].configured = value & 0xff;
         if (x->slots[slot].dev == 2 && !value) pen_detach(x);
+        if (x->slots[slot].dev == 3 && !value) gamepad_detach(x);
         return 0;
     } else if (type == 0x81 && req == 10) { /* GET_INTERFACE */
         tmp[0] = 0;
@@ -410,6 +432,13 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
             memcpy(tmp, x->pen_state, HV_PEN_REPORT_LEN);
             pthread_mutex_unlock(&x->mu);
             src = tmp; len = HV_PEN_REPORT_LEN;
+        }
+        else if (x->slots[slot].dev == 3) {
+            if ((value >> 8) != 1 || (value & 0xff)) return -1;
+            pthread_mutex_lock(&x->mu);
+            memcpy(tmp, x->gamepad.state, HV_GP_REPORT_LEN);
+            pthread_mutex_unlock(&x->mu);
+            src = tmp; len = HV_GP_REPORT_LEN;
         }
         else {
             int rtype = value >> 8, rid = value & 0xff;
@@ -522,7 +551,7 @@ static void run_ep0(HvXhci *x, int slot) {
     }
 }
 
-static uint64_t pen_now_ns(void) {
+static uint64_t hid_now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000 + (uint64_t)ts.tv_nsec;
@@ -565,7 +594,7 @@ static void run_ep_in(HvXhci *x, int slot) {
                Do not consume its TRB until the next service interval. The
                regular device poll handles pending input without sleeping here.
                A backwards host clock after snapshot restore is immediately due. */
-            uint64_t now = pen_now_ns(), previous = x->pen_last_report_ns;
+            uint64_t now = hid_now_ns(), previous = x->pen_last_report_ns;
             if (previous && now >= previous && now - previous < (uint64_t)HV_PEN_INTERVAL_MS * 1000000) break;
             ring_advance(r);
             uint32_t want = trb[2] & 0x1ffff;
@@ -581,6 +610,29 @@ static void run_ep_in(HvXhci *x, int slot) {
                         (unsigned long long)(previous && now >= previous ? (now - previous) / 1000 : 0));
             transfer_event(x, at, n < want ? CC_SHORT_PACKET : CC_SUCCESS, want - n, slot, dci);
             break; /* at most one pen report in this service interval */
+        }
+    } else if (s->dev == 3) {
+        if (!s->configured) { pthread_mutex_unlock(&x->mu); return; }
+        HvGamepadQueue *q = &x->gamepad;
+        if (ring_peek(x, r, trb, &at) && ((trb[3] >> 10) & 0x3f) == TRB_NORMAL && (trb[2] & 0x1ffff) >= HV_GP_REPORT_LEN) {
+            if (!atomic_exchange(&x->gamepad_ready, 1) && x->gamepad_ready_logs++ < 4)
+                fprintf(stderr, "hengevm: xhci: gamepad: guest IN endpoint ready\n");
+        }
+        while (q->head != q->tail && ring_peek(x, r, trb, &at)) {
+            if (((trb[3] >> 10) & 0x3f) != TRB_NORMAL) { ring_advance(r); continue; }
+            uint32_t want = trb[2] & 0x1ffff;
+            if (want < HV_GP_REPORT_LEN) {
+                ring_advance(r);
+                transfer_event(x, at, CC_TRB_ERROR, want, slot, dci);
+                continue; /* an undersized buffer must not lose a button edge */
+            }
+            uint64_t now = hid_now_ns(), previous = q->last_report_ns;
+            if (previous && now >= previous && now - previous < HV_GP_INTERVAL_MS * 1000000ull) break;
+            ring_advance(r);
+            wr(x, (uint64_t)trb[1] << 32 | trb[0], q->reports[q->head++ % HV_GP_REPORTS], HV_GP_REPORT_LEN);
+            q->last_report_ns = now; q->delivered++;
+            transfer_event(x, at, want > HV_GP_REPORT_LEN ? CC_SHORT_PACKET : CC_SUCCESS, want - HV_GP_REPORT_LEN, slot, dci);
+            break;
         }
     } else {
         while (x->tp_rhead != x->tp_rtail && ring_peek(x, r, trb, &at)) {
@@ -651,6 +703,7 @@ static int configure_endpoints(HvXhci *x, int slot, uint64_t input, int deconfig
     uint64_t out = out_ctx(x, slot);
     if (deconfigure) {
         if (s->dev == 2) pen_pause(x);
+        if (s->dev == 3) gamepad_pause(x);
         for (int dci = 2; dci < HV_XHCI_EPS; dci++) s->ep_running[dci] = 0;
         return CC_SUCCESS;
     }
@@ -658,6 +711,7 @@ static int configure_endpoints(HvXhci *x, int slot, uint64_t input, int deconfig
     for (int dci = 2; dci < HV_XHCI_EPS; dci++) {
         if (drop & (1u << dci)) {
             if (s->dev == 2) pen_pause(x);
+        if (s->dev == 3) gamepad_pause(x);
             s->ep_running[dci] = 0;
             uint8_t zero[32] = {0};
             wr(x, out + 32ull * dci, zero, 32);
@@ -716,6 +770,7 @@ static void run_commands(HvXhci *x) {
         case TRB_DISABLE_SLOT:
             if (slot >= 1 && slot <= HV_XHCI_SLOTS) {
                 if (x->slots[slot].dev == 2) pen_detach(x);
+            if (x->slots[slot].dev == 3) gamepad_detach(x);
                 x->slot_used[slot] = 0;
                 x->slots[slot].dev = -1;
                 memset(x->slots[slot].ep_running, 0, sizeof x->slots[slot].ep_running);
@@ -739,12 +794,14 @@ static void run_commands(HvXhci *x) {
         case TRB_RESET_EP: {
             int dci = (trb[3] >> 16) & 0x1f;
             if (x->slots[slot].dev == 2 && dci > 1) pen_pause(x);
+            if (x->slots[slot].dev == 3 && dci > 1) gamepad_pause(x);
             set_ep_state(x, slot, dci, 3); /* stopped */
             break;
         }
         case TRB_STOP_EP: {
             int dci = (trb[3] >> 16) & 0x1f;
             if (x->slots[slot].dev == 2 && dci > 1) pen_pause(x);
+            if (x->slots[slot].dev == 3 && dci > 1) gamepad_pause(x);
             x->slots[slot].ep_running[dci] = 0;
             set_ep_state(x, slot, dci, 3);
             /* The dequeue pointer goes back into the context for the driver to read. */
@@ -762,6 +819,7 @@ static void run_commands(HvXhci *x) {
         }
         case TRB_RESET_DEVICE: {
             if (x->slots[slot].dev == 2) pen_detach(x);
+            if (x->slots[slot].dev == 3) gamepad_detach(x);
             for (int dci = 2; dci < HV_XHCI_EPS; dci++) x->slots[slot].ep_running[dci] = 0;
             uint32_t dw3 = (uint32_t)1 << 27; /* default state, address 0 */
             wr(x, out_ctx(x, slot) + 12, &dw3, 4);
@@ -782,7 +840,7 @@ static void run_commands(HvXhci *x) {
 /* ---- ports ---- */
 
 /* Port 1 is the full-speed keyboard; port 2 is the high-speed Magic Trackpad 2;
-   port 3 is the full-speed absolute pen. */
+   port 3 is the full-speed absolute pen; port 4 is a generic full-speed gamepad. */
 static void port_connect(HvXhci *x) {
     for (int p = 0; p < HV_XHCI_PORTS; p++) {
         x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p == 1 ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
@@ -799,6 +857,13 @@ static void port_write(HvXhci *x, int p, uint32_t v) {
         if (p == 2) {
             pen_detach(x);
             for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) if (x->slots[slot].dev == 2) {
+                x->slots[slot].configured = 0;
+                for (int dci = 2; dci < HV_XHCI_EPS; dci++) x->slots[slot].ep_running[dci] = 0;
+            }
+        }
+        if (p == 3) {
+            gamepad_detach(x);
+            for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) if (x->slots[slot].dev == 3) {
                 x->slots[slot].configured = 0;
                 for (int dci = 2; dci < HV_XHCI_EPS; dci++) x->slots[slot].ep_running[dci] = 0;
             }
@@ -851,6 +916,8 @@ static void reset(HvXhci *x) {
     pen_detach(x);
     x->pen_delivered = x->pen_overflows = 0;
     x->pen_ready_logs = 0;
+    gamepad_detach(x);
+    x->gamepad_ready_logs = 0;
     for (int p = 0; p < HV_XHCI_PORTS; p++)
         x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p == 1 ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
     update_irq(x);
@@ -1080,6 +1147,38 @@ int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y,
     return 0;
 }
 
+int hv_xhci_gamepad_ready(HvXhci *x) { return x && atomic_load(&x->gamepad_ready) && atomic_load(&x->gamepad_accepting); }
+void hv_xhci_gamepad_active(HvXhci *x, int active) {
+    if (!x) return;
+    pthread_mutex_lock(&x->mu);
+    atomic_store(&x->gamepad_accepting, !!active);
+    hv_gp_cancel(&x->gamepad);
+    pthread_mutex_unlock(&x->mu);
+    hv_machine_wake(x->m);
+}
+void hv_xhci_gamepad_cancel(HvXhci *x) {
+    if (!x) return;
+    pthread_mutex_lock(&x->mu);
+    hv_gp_cancel(&x->gamepad);
+    pthread_mutex_unlock(&x->mu);
+    hv_machine_wake(x->m);
+}
+int hv_xhci_gamepad(HvXhci *x, unsigned buttons, int hat, const int axes[6]) {
+    if (!axes || !hv_xhci_gamepad_ready(x)) return -1;
+    uint8_t report[HV_GP_REPORT_LEN];
+    hv_gp_report(report, buttons, hat, axes);
+    pthread_mutex_lock(&x->mu);
+    if (!atomic_load(&x->gamepad_ready) || !atomic_load(&x->gamepad_accepting)) { pthread_mutex_unlock(&x->mu); return -1; }
+    uint64_t before = x->gamepad.overflows;
+    int changed = memcmp(x->gamepad.state, report, HV_GP_REPORT_LEN) != 0;
+    int result = hv_gp_enqueue(&x->gamepad, report);
+    if (x->gamepad.overflows != before && x->gamepad.overflows <= 4)
+        fprintf(stderr, "hengevm: xhci: gamepad queue overflow; controls released\n");
+    pthread_mutex_unlock(&x->mu);
+    if (changed || result != 0) hv_machine_wake(x->m);
+    return result;
+}
+
 /* ---- the keyboard's reports ---- */
 
 void hv_xhci_key(HvXhci *x, uint8_t usage, int down) {
@@ -1271,6 +1370,7 @@ HvXhci *hv_xhci_create(HvMachine *m, HvPcie *bus) {
     HvXhci *x = calloc(1, sizeof *x);
     x->m = m;
     pthread_mutex_init(&x->mu, NULL);
+    atomic_store(&x->gamepad_accepting, 1);
     /* QEMU's xHCI IDs. Class 0x0c0330 with revision 0: macOS's IOPCIClassMatch compares all 32 bits. */
     hv_pci_init(&x->pci, 0x1b36, 0x000d, 0x0c033000, 0x1af4, 0x1100);
     x->pci.opaque = x;

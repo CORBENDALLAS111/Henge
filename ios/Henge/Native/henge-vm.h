@@ -93,6 +93,10 @@ void henge_vm_key_hid(uint8_t usage, int down); /* a hardware keyboard: iOS give
 void henge_vm_mouse_move(int dx, int dy);
 void henge_vm_pointer_reset(void);
 int henge_vm_pen_ready(void);
+/* One generic USB gamepad, independent of Bluetooth pairing on the host. */
+int henge_vm_gamepad_ready(void);
+int henge_vm_gamepad(unsigned buttons, int hat, const int32_t axes[6]);
+void henge_vm_gamepad_cancel(void);
 /* HID units: XY 0..32767; pressure 0..4095; tilt hundredths of degrees;
    twist hundredths of degrees 0..35999. flags tip=1, barrel=2, range=4, invert=8. */
 int henge_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags);

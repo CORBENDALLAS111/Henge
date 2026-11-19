@@ -1,5 +1,6 @@
 import SwiftUI
 import GameController
+import AVFAudio
 
 /// A running Mac. Upright, its screen sits above a trackpad; on its side the screen fills the device
 /// and is its own trackpad. Zoomed in, the screen fills the device either way and follows the pointer.
@@ -9,12 +10,18 @@ struct SessionView: View {
     let close: () -> Void
 
     @StateObject private var display = DisplayRouter()
+    @StateObject private var fileTransfers = FileTransfers()
+    @StateObject private var gamepad = HardwareGamepad.shared
     @State private var error: String?
     @State private var state: Int32 = 0
     @State private var bootAttempt = 0
     @State private var cpusOn: Int32 = 0
     @State private var userCode = false
     @State private var softwareIdentityStatus: Int32 = 0
+    @State private var pencilInRange = false
+    @State private var audioOutput = AudioOutputPicker.routeDescription
+    @State private var keyboardConnected = GCKeyboard.coalesced != nil
+    @AppStorage(HardwareGamepad.enabledKey) private var forwardGamepad = true
     @State private var blocksPerSecond: Double = 0
     @State private var framesOut: UInt64 = 0
     @State private var framesIn: UInt64 = 0
@@ -33,6 +40,8 @@ struct SessionView: View {
     @State private var typing = false
     @State private var zoomed = false
     @State private var showDetails = false
+    @State private var showFiles = false
+    @State private var fileDropTargeted = false
     @State private var controlsHidden = false
     @State private var showRevealHint = false
     @State private var pointerRefused = false
@@ -53,8 +62,10 @@ struct SessionView: View {
 
 
     private var touchInputActive: Bool {
-        scenePhase == .active && state == 1 && !showDetails && !confirmStop && error == nil
+        scenePhase == .active && state == 1 && !showDetails && !showFiles && !confirmStop && error == nil
     }
+
+    private var controllerInputActive: Bool { touchInputActive && forwardGamepad }
 
     private func resetPointerInput() {
         NotificationCenter.default.post(name: TouchInputSafety.reset, object: nil)
@@ -102,11 +113,12 @@ struct SessionView: View {
                     Trackpad(isActive: touchInputActive)
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
-                    if touchMode == "direct" && !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive)
-                            .frame(width: layout.screen.width, height: layout.screen.height)
-                            .position(x: layout.screen.midX, y: layout.screen.midY)
-                            .accessibilityLabel("Direct Mac touch and Apple Pencil surface")
+                    if !display.isExternal {
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct",
+                                           imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
+                            .frame(width: layout.touch.width, height: layout.touch.height)
+                            .position(x: layout.touch.midX, y: layout.touch.midY)
+                            .accessibilityLabel(touchMode == "direct" ? "Direct Mac touch and Apple Pencil surface" : "Mac trackpad and Apple Pencil surface")
                     }
                     if inputMode == .volumeButtons && volumeMode == .intercept {
                         // The capture interaction must live in the SwiftUI hierarchy to receive
@@ -162,6 +174,12 @@ struct SessionView: View {
                 if let error { errorCard(error, layout) }
                 KeyboardCatcher(active: $typing).frame(width: 0, height: 0)
             }
+            .onDrop(of: FileTransfers.dropTypes, isTargeted: $fileDropTargeted) { providers in
+                resetPointerInput()
+                let accepted = fileTransfers.accept(providers)
+                if accepted { showFiles = true }
+                return accepted
+            }
             .frame(width: full.width, height: full.height)
             .ignoresSafeArea()
             .animation(.easeInOut(duration: 0.25), value: zoomed)
@@ -185,18 +203,33 @@ struct SessionView: View {
         .statusBarHidden(zoomed || Device.isPad)
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $showDetails) { details }
+        .sheet(isPresented: $showFiles) { SharedFilesView(transfers: fileTransfers) }
         .confirmationDialog("Shut down \(mac.name)?", isPresented: $confirmStop, titleVisibility: .visible) {
             Button("Shut Down", role: .destructive) { finish() }
         } message: {
             Text("This turns the Mac off at once. Anything not saved on it is lost.")
         }
-        .onChange(of: zoomed && (touchMode != "direct" || display.isExternal)) { on in
+        .onChange(of: zoomed && !pencilInRange && (touchMode != "direct" || display.isExternal)) { on in
             zoomFollowing?.cancel()
             zoomFollowing = on ? Task { await followPointer() } : nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: TouchInputSafety.pencilPresence)) { note in
+            pencilInRange = note.userInfo?["present"] as? Bool ?? false
         }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
+        .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in
+            HardwareKeys.releaseAll(); StickyKeys.shared.releaseAll()
+            keyboardConnected = GCKeyboard.coalesced != nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect).receive(on: DispatchQueue.main)) { _ in
+            keyboardConnected = GCKeyboard.coalesced != nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: DispatchQueue.main)) { _ in
+            audioOutput = AudioOutputPicker.routeDescription
+        }
         .onChange(of: inputMode) { _ in resetPointerInput() }
         .onChange(of: display.isExternal) { _ in resetPointerInput() }
         .onChange(of: scenePhase) { phase in
@@ -213,11 +246,16 @@ struct SessionView: View {
         .onChange(of: showDetails) { showing in
             if showing { HardwareKeys.releaseAll(); resetPointerInput() }
         }
+        .onChange(of: showFiles) { _, showing in
+            if showing { HardwareKeys.releaseAll(); resetPointerInput() }
+        }
         .onChange(of: confirmStop) { showing in
             if showing { HardwareKeys.releaseAll(); resetPointerInput() }
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            gamepad.start()
+            gamepad.setActive(controllerInputActive)
             HardwareMouse.shared.start()
             HardwareMouse.shared.setActive(touchInputActive)
             VolumeClicks.shared.start()
@@ -228,16 +266,18 @@ struct SessionView: View {
             StickyKeys.shared.releaseAll()
             HardwareKeys.releaseAll()
             resetPointerInput()
+            gamepad.stop()
             HardwareMouse.shared.stop()
             VolumeClicks.shared.stop()
         }
         .modifier(ExternalMacDisplayModifier(presentation: MacPresentation(display: display, aspect: mac.aspect)))
         .task(id: bootAttempt) { await run() }
         .task { await Sharing.followMacClipboard() }
+        .task { await gamepad.followGuest() }
     }
 
     /// When there is something of the app's to point at, iPadOS gets its own pointer back.
-    private var pointerNeeded: Bool { state == 2 || showDetails || confirmStop || error != nil }
+    private var pointerNeeded: Bool { state == 2 || showDetails || showFiles || confirmStop || error != nil }
 
     // MARK: Layout
 
@@ -321,6 +361,10 @@ struct SessionView: View {
                 Spacer()
                 tool("plus.magnifyingglass", "Zoom in") { zoomed = true }
                 Spacer()
+                if layout.pad.width >= 390 {
+                    tool("folder", "Shared Files") { showFiles = true }
+                    Spacer()
+                }
                 tool("info.circle", "Details") { showDetails = true }
                 Spacer()
                 tool("power", "Shut down", tint: Desk.bad) { stopTapped() }
@@ -412,6 +456,7 @@ struct SessionView: View {
             tool("eye.slash", "Hide controls", tint: .white) { hideControls() }
             tool("keyboard", "Keyboard", tint: .white) { typing.toggle() }
             pasteTool
+            if layout.touch.width >= 360 { tool("folder", "Shared Files", tint: .white) { showFiles = true } }
             tool(zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass", zoomed ? "Zoom out" : "Zoom in", tint: zoomed ? Desk.accentLight : .white) { zoomed.toggle() }
             tool("info.circle", "Details", tint: .white) { showDetails = true }
             Rectangle().fill(Color.white.opacity(0.3)).frame(width: 1, height: 22).padding(.horizontal, 4)
@@ -528,7 +573,7 @@ struct SessionView: View {
                     }
                     .pickerStyle(.segmented)
                     Text(touchMode == "direct" ? TouchInputSafety.directDescription
-                         : "Swipe to move the pointer; tap to click, hold then move to drag. Touch input pauses while a physical mouse is connected.")
+                         : "Swipe to move the pointer; tap to click, hold then move to drag. Pencil still points and draws directly on the Mac image. Touch and Pencil pause while a physical mouse is connected.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Pointer") {
@@ -544,8 +589,24 @@ struct SessionView: View {
                     Text("The Mac supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                Section("Connected devices") {
+                    LabeledContent("Keyboard", value: keyboardConnected ? "Connected through iPadOS" : "Not connected")
+                    LabeledContent("Mouse / trackpad", value: HardwareMouse.shared.hasMouse ? "Connected through iPadOS" : "Not connected")
+                    Toggle("Forward game controller", isOn: $forwardGamepad)
+                    Text(gamepad.status).font(.footnote).foregroundStyle(.secondary)
+                    HStack {
+                        LabeledContent("Audio output", value: audioOutput)
+                        AudioOutputPicker().frame(width: 44, height: 44)
+                    }
+                    Text("Pair accessories in iPadOS Settings. Keyboard and mouse use virtual input devices; the first supported controller uses Henge USB Gamepad. Audio follows the iPadOS output. Bluetooth pairing inside macOS, arbitrary BLE devices and controller vibration are not bridged.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("Sharing") {
                     LabeledContent("Clipboard and folder", value: helperRunning ? "On" : "Not set up")
+                    Button("Shared Files") {
+                        showDetails = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showFiles = true }
+                    }
                     if !helperRunning {
                         Button("Type the Set Up Command") {
                             showDetails = false
@@ -723,6 +784,7 @@ struct SessionView: View {
                 StickyKeys.shared.releaseAll()
                 HardwareKeys.releaseAll()
                 resetPointerInput()
+                gamepad.stop()
                 HardwareMouse.shared.stop()
                 UIApplication.shared.isIdleTimerDisabled = false
                 HengeLog.log("session", "showing stopped Mac: \(String(cString: henge_vm_exit_reason()))")

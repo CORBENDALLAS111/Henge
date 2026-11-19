@@ -52,6 +52,7 @@ Then a Henge folder in the Mac's home folder is the same folder as Files › Hen
 
 ## Known limits
 
+- [Pencil, connected-device input and Shared Files drag-and-drop](docs/pencil-devices-files.md) have experimental bridges; on-device compatibility is not yet verified.
 - Signing in to an Apple Account inside macOS fails with a verification error. An opt-in [Ventura 13.6 experiment](docs/ventura-account-experiment.md) is available for a separate new VM; sign-in and App Store downloads remain unverified.
   See [Apple services diagnostics and platform limits](docs/apple-services.md).
 - Graphics are tested on macOS's own apps, Chrome, Firefox, VS Code and Discord. Other apps may draw wrongly.
