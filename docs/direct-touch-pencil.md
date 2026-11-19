@@ -37,6 +37,10 @@ a port bitmask (the distinction matters when adding the third port).
   range because macOS does not dispatch absolute pointer edges outside range.
 - The bounded queue preserves button/proximity transitions while coalescing
   motion. Overflow cancels the contact instead of losing an up transition.
+  The full-speed pen endpoint delivers at most one report per advertised 1 ms
+  interval. A quick tap's down/up/leave must not drain into the same controller
+  pass merely because the guest posted multiple receive buffers. No sleeps are
+  added to the CPU/input thread; pending reports use the regular device poll.
   USB endpoint interruption queues release; USB device reset discards old state
   and readiness. Only a configured guest driver posting a full input transfer
   enables absolute input. There is no relative-pointer positioning fallback.
@@ -53,7 +57,7 @@ the previous build is incompatible. Disk, auxiliary storage, VM identity, custom
 resolution and external-display settings are not recreated by this change.
 
 Bounded `xhci: absolute pen` messages report guest IN-endpoint readiness, the
-first four report deliveries and up to four queue overflows. They contain no
+first twelve report deliveries (flags and inter-report time only) and up to four queue overflows. They contain no
 coordinates, pressure samples, account details or credentials. A readiness log
 proves that USB transfers were posted, not that the guest cursor behaves correctly.
 
@@ -72,6 +76,13 @@ button edges, motion coalescing, cancel at delivered position, overflow release,
 endpoint interruption, unconfiguration and reset. Swift mapping tests cover
 coordinates, out-of-bounds/nonfinite input, pressure, tilt and barrel roll. Full
 SDK compilation checks Pencil APIs with the existing iOS 17 deployment target.
+
+The interrupt-interval regression failed on the previous controller: one poll
+completed all four queued contact reports at once. A deterministic monotonic
+clock now checks the 999,999 ns/1,000,000 ns boundary, repeated polls without time
+advancing, eight short taps queued while the guest stalls, and a backwards host
+clock after snapshot restore. This confirms the transport fix; it does not prove
+that it explains every missed click in the user's guest applications.
 
 **No iPad/Pencil Pro or running Ventura guest is attached to this environment.**
 Guest driver binding, absolute-position calibration, clicking, long presses,

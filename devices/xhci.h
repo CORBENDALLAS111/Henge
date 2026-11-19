@@ -90,6 +90,7 @@ typedef struct HvXhci {
     uint8_t pen_state[HV_PEN_REPORT_LEN], pen_delivered_state[HV_PEN_REPORT_LEN];
     uint32_t pen_head, pen_tail;
     uint64_t pen_delivered, pen_overflows;
+    uint64_t pen_last_report_ns;
     unsigned pen_ready_logs;
     _Atomic int pen_ready;
     int pen_blocked;

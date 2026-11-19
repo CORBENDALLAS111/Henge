@@ -140,7 +140,7 @@ static const uint8_t pen_config_desc[34] = {
     9,2,34,0,1,1,0,0x80,50,
     9,4,0,0,1,3,0,0,0,
     9,0x21,0x11,0x01,0,1,0x22,sizeof hv_pen_descriptor,0,
-    7,5,0x81,3,64,0,1
+    7,5,0x81,3,64,0,HV_PEN_INTERVAL_MS
 };
 static const char *const pen_strings[] = {NULL,"HengeVM","Henge Absolute Pen","1"};
 static const struct HvXhciDev devs[HV_XHCI_DEVICES] = {
@@ -156,6 +156,7 @@ static void pen_detach(HvXhci *x) {
     atomic_store(&x->pen_ready, 0);
     x->pen_head = x->pen_tail = 0;
     x->pen_blocked = 0;
+    x->pen_last_report_ns = 0;
     memset(x->pen_state, 0, sizeof x->pen_state);
     memset(x->pen_delivered_state, 0, sizeof x->pen_delivered_state);
     pthread_mutex_unlock(&x->mu);
@@ -521,6 +522,12 @@ static void run_ep0(HvXhci *x, int slot) {
     }
 }
 
+static uint64_t pen_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000 + (uint64_t)ts.tv_nsec;
+}
+
 /* Give the device's waiting reports to the interrupt IN endpoint's posted transfers. */
 static void run_ep_in(HvXhci *x, int slot) {
     struct HvXhciSlot *s = &x->slots[slot];
@@ -551,17 +558,29 @@ static void run_ep_in(HvXhci *x, int slot) {
                 fprintf(stderr, "hengevm: xhci: absolute pen: guest IN endpoint ready (slot %d)\n", slot);
         }
         while (x->pen_head != x->pen_tail && ring_peek(x, r, trb, &at)) {
+            if (((trb[3] >> 10) & 0x3f) != TRB_NORMAL) { ring_advance(r); continue; }
+            /* This is a full-speed interrupt endpoint, not a bulk stream.
+               Sending a short tap's down/up/leave in one controller pass
+               violates bInterval and gives the guest no separate USB samples.
+               Do not consume its TRB until the next service interval. The
+               regular device poll handles pending input without sleeping here.
+               A backwards host clock after snapshot restore is immediately due. */
+            uint64_t now = pen_now_ns(), previous = x->pen_last_report_ns;
+            if (previous && now >= previous && now - previous < (uint64_t)HV_PEN_INTERVAL_MS * 1000000) break;
             ring_advance(r);
-            if (((trb[3] >> 10) & 0x3f) != TRB_NORMAL) continue;
             uint32_t want = trb[2] & 0x1ffff;
             uint32_t n = want < HV_PEN_REPORT_LEN ? want : HV_PEN_REPORT_LEN;
             uint8_t *report = x->pen_reports[x->pen_head++ % HV_PEN_REPORTS];
             wr(x, (uint64_t)trb[1] << 32 | trb[0], report, n);
             memcpy(x->pen_delivered_state, report, HV_PEN_REPORT_LEN);
+            x->pen_last_report_ns = now;
             x->pen_delivered++;
-            if (x->pen_delivered <= 4)
-                fprintf(stderr, "hengevm: xhci: absolute pen: report delivered (%llu)\n", (unsigned long long)x->pen_delivered);
+            if (x->pen_delivered <= 12)
+                fprintf(stderr, "hengevm: xhci: absolute pen: report delivered (%llu) flags=%02x interval_us=%llu\n",
+                        (unsigned long long)x->pen_delivered, report[0],
+                        (unsigned long long)(previous && now >= previous ? (now - previous) / 1000 : 0));
             transfer_event(x, at, n < want ? CC_SHORT_PACKET : CC_SUCCESS, want - n, slot, dci);
+            break; /* at most one pen report in this service interval */
         }
     } else {
         while (x->tp_rhead != x->tp_rtail && ring_peek(x, r, trb, &at)) {
