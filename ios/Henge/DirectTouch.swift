@@ -137,10 +137,12 @@ struct DirectTouchSurface: UIViewRepresentable {
                 proximity.recordSample(estimate: touch.estimationUpdateIndex?.intValue, timestamp: touch.timestamp)
             }
             lastHoverTime = ProcessInfo.processInfo.systemUptime
+            let point = touch.preciseLocation(in: self)
+            lastHover = point
             var roll: CGFloat = 0
             if #available(iOS 17.5, *) { roll = touch.rollAngle }
             let pressure = touch.maximumPossibleForce > 0 ? touch.force / touch.maximumPossibleForce : 1
-            send(touch.preciseLocation(in: self), pressure: down ? pressure : 0, altitude: touch.altitudeAngle,
+            send(point, pressure: down ? pressure : 0, altitude: touch.altitudeAngle,
                  azimuth: touch.azimuthAngle(in: self), roll: roll, flags: 4 | (down ? 1 : 0) | (eraser ? 8 : 0))
         }
         private func pressFinger() {

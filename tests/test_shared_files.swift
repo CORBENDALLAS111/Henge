@@ -2,7 +2,7 @@ import Foundation
 
 @main struct SharedFileTests {
     static func main() throws {
-        func check(_ value: @autoclosure () throws -> Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) throws {
+        func check(_ value: @autoclosure () throws -> Bool, _ message: String = "", file: StaticString = #file, line: UInt = #line) throws {
             let passed = try value()
             precondition(passed, message, file: file, line: line)
         }

@@ -99,7 +99,7 @@ final class SharedFileStore: @unchecked Sendable {
                 let stem = ext.isEmpty ? name : (name as NSString).deletingPathExtension
                 for suffix in 0..<10_000 {
                     let candidate = suffix == 0 ? name : stem + " \(suffix + 1)" + (ext.isEmpty ? "" : "." + ext)
-                    let destination = folder.appendingPathComponent(candidate)
+                    let destination = folder.appendingPathComponent(candidate, isDirectory: directory)
                     do {
                         try fm.moveItem(at: copy, to: destination)
                         result = destination

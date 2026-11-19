@@ -44,30 +44,29 @@ final class FileTransfers: ObservableObject {
                 else { complete(.failure(error ?? CocoaError(.fileReadUnknown))) }
             }
             let representation = Self.representation(provider)
+            // These methods start asynchronous loads. Start them on this actor;
+            // do not transfer a non-Sendable NSItemProvider to our worker queue.
+            // Provider callbacks still copy their temporary URL before returning.
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                work.async {
-                    _ = provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
-                        let url: URL?
-                        if let value = item as? URL { url = value }
-                        else if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
-                        else if let text = item as? String { url = URL(string: text) }
-                        else { url = nil }
-                        if let url, error == nil {
-                            let result = Result { try store.importFile(url, preferredName: suggested, into: directory) }
-                            if case .success = result { complete(result); return }
-                            if representation == nil { complete(result); return }
-                        }
-                        // Cloud providers can vend a URL that is not readable by
-                        // this process. Ask for a file promise before reporting failure.
-                        if let representation {
-                            _ = provider.loadFileRepresentation(forTypeIdentifier: representation, completionHandler: finish)
-                        } else { finish(nil, error) }
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+                    let url: URL?
+                    if let value = item as? URL { url = value }
+                    else if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+                    else if let text = item as? String { url = URL(string: text) }
+                    else { url = nil }
+                    if let url, error == nil {
+                        let result = Result { try store.importFile(url, preferredName: suggested, into: directory) }
+                        if case .success = result { complete(result); return }
+                        if representation == nil { complete(result); return }
                     }
+                    // Cloud providers can vend a URL that is not readable by
+                    // this process. Ask for a file promise before reporting failure.
+                    if let representation {
+                        _ = provider.loadFileRepresentation(forTypeIdentifier: representation, completionHandler: finish)
+                    } else { finish(nil, error) }
                 }
             } else if let type = representation {
-                work.async {
-                    _ = provider.loadFileRepresentation(forTypeIdentifier: type, completionHandler: finish)
-                }
+                _ = provider.loadFileRepresentation(forTypeIdentifier: type, completionHandler: finish)
             }
         }
         return true
