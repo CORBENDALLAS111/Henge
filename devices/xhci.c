@@ -777,7 +777,13 @@ static void port_write(HvXhci *x, int p, uint32_t v) {
     s &= ~(v & PORT_CHANGES); /* write 1 to clear */
     if (v & PORT_PED) s &= ~PORT_PED;
     if (v & PORT_PR) { /* reset: enabled, in U0 */
-        if (p == 2) pen_detach(x);
+        if (p == 2) {
+            pen_detach(x);
+            for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) if (x->slots[slot].dev == 2) {
+                x->slots[slot].configured = 0;
+                for (int dci = 2; dci < HV_XHCI_EPS; dci++) x->slots[slot].ep_running[dci] = 0;
+            }
+        }
         s = (s & ~(0xfu << PORT_PLS_SHIFT)) | PORT_PED | PORT_PRC;
         x->portsc[p] = s;
         port_event(x, p);

@@ -73,7 +73,8 @@ int main(void) {
     assert(control(x, 3, unconfigure, out, sizeof out) == 0);
     run_ep_in(x, 3); assert(hv_xhci_pen_ready(x));
     port_write(x, 2, PORT_PR | PORT_PP);
-    assert(!hv_xhci_pen_ready(x));
+    run_ep_in(x, 3);
+    assert(!hv_xhci_pen_ready(x) && !x->slots[3].configured && !x->slots[3].ep_running[3]);
 
     uint8_t sample[13]; hv_pen_report(sample, 40000, -10, 9000, -10000, 10000, 40000, 15);
     assert(u16(sample + 1) == 32767 && u16(sample + 3) == 0 && u16(sample + 5) == 4095);
