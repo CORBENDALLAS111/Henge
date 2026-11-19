@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Standard HID units; independent of guest resolution and mouse acceleration.
 struct AbsolutePenSample {
