@@ -735,10 +735,10 @@ static MTLTextureDescriptor *descriptor_v2(const uint8_t *d) {
         memcpy(&v, &h.offset, sizeof v);
         HvObject *parent = [self object:h.buffer task:task];
         id<MTLTexture> from = parent ? parent->object : nil;
-        if (!from) { [self complain:[NSString stringWithFormat:@"view of nothing (tag %u, ref %u)", h.tag, h.buffer]]; return; }
         o->parent = parent;
         o->parent_ref = h.buffer;
-        o->surface = parent->surface;
+        o->surface = parent ? parent->surface : nil;
+        if (!from) { [self complain:[NSString stringWithFormat:@"view of nothing (tag %u, ref %u)", h.tag, h.buffer]]; return; }
         NSRange levels = NSMakeRange((NSUInteger)v.levels[0], (NSUInteger)v.levels[1]), slices = NSMakeRange((NSUInteger)v.slices[0], (NSUInteger)v.slices[1]);
         if (h.tag == 7) o->object = [from newTextureViewWithPixelFormat:(MTLPixelFormat)v.format];
         else if (h.tag == 8) o->object = [from newTextureViewWithPixelFormat:(MTLPixelFormat)v.format textureType:(MTLTextureType)v.type levels:levels slices:slices];
@@ -1100,9 +1100,9 @@ static void sync_iosurface(HvObject *s) {
     if (plane0 < 0) plane0 = getenv("HV_PVG_PLANE0") != NULL;
     if (plane0) plane = 0;
     if (surface->iosurface && plane >= IOSurfaceGetPlaneCount(surface->iosurface)) {
-        [self complain:[NSString stringWithFormat:@"surface %llu: texture on plane %u of %zu; using plane 0", h.mapping, plane,
+        [self complain:[NSString stringWithFormat:@"surface %llu: invalid texture plane %u of %zu; binding refused", h.mapping, plane,
                         IOSurfaceGetPlaneCount(surface->iosurface)]];
-        plane = 0;
+        return;
     }
     if (plane) {
         static int told;
@@ -1120,8 +1120,11 @@ static void sync_iosurface(HvObject *s) {
         o->object = [(id<MTLBuffer>)surface->object newTextureWithDescriptor:t offset:surface->first bytesPerRow:surface->row];
     if (!o->object) {
         [self complain:[NSString stringWithFormat:@"surface %llu: format %lu row %llu not possible", h.mapping, (unsigned long)t.pixelFormat, surface->row]];
-        t.storageMode = MTLStorageModePrivate;
-        o->object = [device newTextureWithDescriptor:t]; /* something to bind: it stays empty */
+        /* An unrelated private allocation has neither the guest's pixels nor
+           any path to share GPU writes with WindowServer. Its contents are
+           undefined. Leave the resource unresolved and reject its exec below,
+           rather than sampling garbage or claiming this mapping succeeded. */
+        return;
     }
     if (!plane) mapped_textures[@(h.mapping)] = o->object;
 }
@@ -2120,12 +2123,25 @@ typedef struct {
     tracing = hv_pvg_trace_on() != 0;
     if (tracing) fprintf(stderr, "trace: exec task %u, %u resources, %u buffers\n", task, nres, nbuf);
     double t_begin = now_seconds();
+    /* Resolve mapped resources before encoding any uploads or mutating validity
+       state. Unsupported mappings cannot be made valid by an empty texture. */
+    NSMutableArray<HvObject *> *resources = [NSMutableArray arrayWithCapacity:nres];
+    for (uint32_t i = 0; i < nres; i++) {
+        HvObject *o = [self object:res[i * 2] task:task];
+        [resources addObject:o ?: [HvObject new]];
+        for (HvObject *dependency = o; dependency; dependency = dependency->parent) {
+            if ((dependency->entry[0] & 0xff) == OBJ_MAPPED_TEXTURE && !dependency->object) {
+                [self complain:[NSString stringWithFormat:@"task %u ref %u: exec rejected for unresolved mapped texture", task, res[i * 2]]];
+                return NO;
+            }
+        }
+    }
     id<MTLCommandBuffer> cb = [queue commandBuffer];
     cb.label = [NSString stringWithFormat:@"task=%u channel=%u stamp=%u", task, ch, stamp];
     id<MTLBlitCommandEncoder> blit = nil;
     BOOL sync_after = NO;
     for (uint32_t i = 0; i < nres; i++) {
-        HvObject *o = [self object:res[i * 2] task:task];
+        HvObject *o = resources[i];
         if (!o) continue;
         if (o->mapped) refresh_pages(self, task, o);
         if (o->surface) sync_iosurface(o->surface);
@@ -2149,7 +2165,7 @@ typedef struct {
        upload that over what the GPU drew: mostly zeros, which show as black boxes. */
     for (uint32_t i = 0; i < nres; i++)
         if (res[i * 2 + 1] & 2) { /* and what it is made from: a texture in a heap is the heap's bytes */
-            for (HvObject *o = [self object:res[i * 2] task:task]; o; o = o->parent) o->guest_stale = YES;
+            for (HvObject *o = resources[i]; o; o = o->parent) o->guest_stale = YES;
         }
     id e = nil; /* the open encoder */
     uint32_t etype = 0;
@@ -2222,7 +2238,7 @@ typedef struct {
         id<MTLBlitCommandEncoder> back = nil;
         for (uint32_t i = 0; i < nres; i++) {
             if (!(res[i * 2 + 1] & 4)) continue;
-            HvObject *o = [self object:res[i * 2] task:task];
+            HvObject *o = resources[i];
             if (!o || !o->guest_backed) continue;
             [self page:o toGuest:YES task:task blit:&back commandBuffer:cb];
             o->guest_stale = NO;
@@ -2232,7 +2248,7 @@ typedef struct {
     /* Includes read-only users and texture views. Shared mappings share this
        fence, so a CPU upload cannot race a prior process sampling the surface. */
     for (uint32_t i = 0; i < nres; i++) {
-        HvObject *o = [self object:res[i * 2] task:task];
+        HvObject *o = resources[i];
         if (o && o->surface && o->surface->surface_sync) o->surface->surface_sync->last_use = cb;
     }
     double t1 = now_seconds();

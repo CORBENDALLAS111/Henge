@@ -23,6 +23,15 @@ void hv_pvg_lite_command(HvPvgLite *p, const uint32_t *c, uint32_t n) { (void)p;
 void hv_pvg_lite_complete(HvPvgLite *p, uint32_t ch, uint32_t stamp) { (void)p; (void)ch; (void)stamp; }
 int hv_pvg_trace_on(void) { return 0; }
 
+@interface SurfaceReplay : HvReplay {
+@public
+    HvObject *test_surface;
+}
+@end
+@implementation SurfaceReplay
+- (HvObject *)currentSurface:(uint64_t)mapping { (void)mapping; return test_surface; }
+@end
+
 static void texture_record(uint32_t at, uint32_t width) {
     uint32_t header[] = {1, 36, 1};
     memcpy(guest + at, header, sizeof header);
@@ -89,6 +98,22 @@ static void test_planes(id<MTLDevice> device) {
     sync_iosurface(s);
 }
 
+static void test_invalid_mapping(id<MTLDevice> device) {
+    SurfaceReplay *r = [SurfaceReplay new];
+    r->device = device; r->tasks = [NSMutableDictionary new]; r->complaints = [NSMutableSet new];
+    r->test_surface = [HvObject new];
+    r->test_surface->object = [device newBufferWithLength:0x4000 options:MTLResourceStorageModeShared];
+    r->test_surface->length = 0x4000; r->test_surface->row = 4; /* cannot hold a 64-pixel row */
+    uint32_t *entries = (uint32_t *)(guest + 0x100);
+    entries[9] = (56 << 8) | OBJ_MAPPED_TEXTURE; entries[10] = 0x2000;
+    uint64_t mapping = 1; memcpy(guest + 0x2000, &mapping, 8);
+    texture_record(0x2008, 64); /* mapped header + descriptor, v1 */
+    HvObject *o = [r object:3 task:0];
+    assert(o && !o->object); /* never replace failed mapping with undefined pixels */
+    uint32_t args[] = {0, 1, 0, 3, 0};
+    assert(![r exec:args length:sizeof args channel:0 stamp:1]);
+}
+
 int main(void) {
     alarm(30);
     @autoreleasepool {
@@ -97,8 +122,8 @@ int main(void) {
         for (unsigned i = 0; i < sizeof bytes; i++) {
             bytes[i] = 1; assert(hash_bytes(bytes, sizeof bytes) != initial); bytes[i] = 0;
         }
-        test_view_reuse(device); test_planes(device);
-        puts("PASS: every-byte updates, dirty-plane preservation, upload fence, invalid plane, reused parent texture views");
+        test_view_reuse(device); test_planes(device); test_invalid_mapping(device);
+        puts("PASS: every-byte updates, dirty-plane preservation, upload fence, invalid plane, reused parent views, invalid mapping rejection");
     }
     return 0;
 }
