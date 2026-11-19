@@ -5,6 +5,7 @@
 #include <assert.h>
 
 static uint8_t guest[65536];
+static int old_driver;
 int hv_pvg_lite_task_read(HvPvgLite *p, uint32_t task, uint64_t at, void *out, uint32_t n) {
     (void)p; (void)task;
     if (at > sizeof guest || n > sizeof guest - at) return -1;
@@ -14,7 +15,7 @@ uint64_t hv_pvg_lite_task_objects(HvPvgLite *p, uint32_t task) { (void)p; (void)
 void hv_pvg_lite_task_pages(HvPvgLite *p, uint32_t t, uint64_t f, uint64_t n, uint32_t *out) {
     (void)p; (void)t; (void)f; memset(out, 0, n * 4);
 }
-int hv_pvg_lite_old_driver(HvPvgLite *p) { (void)p; return 0; }
+int hv_pvg_lite_old_driver(HvPvgLite *p) { (void)p; return old_driver; }
 uint8_t *hv_pvg_lite_page(HvPvgLite *p, uint32_t page) { (void)p; (void)page; return NULL; }
 void *hv_pvg_lite_phys(HvPvgLite *p, uint64_t pa, uint64_t n) { (void)p; (void)pa; (void)n; return NULL; }
 const uint8_t *hv_pvg_lite_surface(HvPvgLite *p, uint32_t m) { (void)p; (void)m; return NULL; }
@@ -26,10 +27,14 @@ int hv_pvg_trace_on(void) { return 0; }
 @interface SurfaceReplay : HvReplay {
 @public
     HvObject *test_surface;
+    NSDictionary<NSNumber *, id> *test_objects;
 }
 @end
 @implementation SurfaceReplay
 - (HvObject *)currentSurface:(uint64_t)mapping { (void)mapping; return test_surface; }
+- (id)get:(uint32_t)ref task:(uint32_t)task {
+    return test_objects ? test_objects[@(ref)] : [super get:ref task:task];
+}
 @end
 
 static void texture_record(uint32_t at, uint32_t width) {
@@ -127,6 +132,76 @@ static void test_surface_identity(void) {
     assert(![key isEqual:surface_key(s, pages, 2)]);
 }
 
+static void test_missing_pipeline_diagnostics(void) {
+    for (int legacy = 0; legacy <= 1; legacy++) {
+        old_driver = legacy;
+        HvReplay *r = [HvReplay new];
+        r->pipeline_ref = 72; r->pass_ref = 14;
+        r->pass_width = 640; r->pass_height = 256; r->pass_format = MTLPixelFormatBGRA8Unorm;
+        r->pass_clears_magenta = YES;
+        Rec empty = {NULL, 0};
+        /* Nothing should touch the Metal encoder or read a draw's payload when
+           its pipeline is missing, but every dropped draw must be counted. */
+        [r render:nil tag:1 rec:empty task:9];
+        [r render:nil tag:1 rec:empty task:9];
+        assert(r->skipped_render_draws == 2 && r->replay_notes.count == 1);
+        [r compute:nil tag:200 rec:empty task:9];
+        assert(r->skipped_compute_dispatches == 1 && r->replay_notes.count == 2);
+        for (unsigned i = 0; i < 100; i++) [r render:nil tag:1 rec:empty task:100 + i];
+        assert(r->skipped_render_draws == 102 && r->replay_notes.count == 64);
+    }
+    old_driver = 0;
+}
+
+/* A magenta clear followed by a dropped draw reproduces a solid colored
+   target with no Metal error. Rebinding a valid pipeline must draw green:
+   diagnostics must report the failure without changing or hiding pixels. */
+static void test_guest_magenta_clear(id<MTLDevice> device) {
+    SurfaceReplay *r = [SurfaceReplay new];
+    r->device = device; r->complaints = [NSMutableSet new];
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:64 height:32 mipmapped:NO];
+    td.usage = MTLTextureUsageRenderTarget;
+    id<MTLTexture> target = [device newTextureWithDescriptor:td]; assert(target);
+    NSError *error = nil;
+    id<MTLLibrary> lib = [device newLibraryWithSource:@"#include <metal_stdlib>\nusing namespace metal;\nvertex float4 v(uint i [[vertex_id]]) { return float4((i & 1) ? 1.0 : -1.0, (i & 2) ? 1.0 : -1.0, 0, 1); }\nfragment float4 f() { return float4(0, 1, 0, 1); }" options:nil error:&error];
+    assert(lib && !error);
+    MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+    pd.vertexFunction = [lib newFunctionWithName:@"v"]; pd.fragmentFunction = [lib newFunctionWithName:@"f"];
+    pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    id<MTLRenderPipelineState> pipe = [device newRenderPipelineStateWithDescriptor:pd error:&error];
+    assert(pipe && !error);
+    r->test_objects = @{@10: target, @72: pipe};
+    uint8_t pass[0x22c] = {0};
+    uint32_t ref = 10; memcpy(pass + 0x4c, &ref, 4);
+    uint16_t load = MTLLoadActionClear, store = MTLStoreActionStore;
+    memcpy(pass + 0x4c + 20, &load, 2); memcpy(pass + 0x4c + 22, &store, 2);
+    double magenta[] = {1, 0, 1, 1}; memcpy(pass + 0x4c + 0x1c, magenta, sizeof magenta);
+    id<MTLCommandQueue> q = [device newCommandQueue];
+    id<MTLBuffer> pixels = [device newBufferWithLength:64 * 32 * 4 options:MTLResourceStorageModeShared];
+    for (int valid = 0; valid <= 1; valid++) {
+        r->pipeline_set = NO;
+        id<MTLCommandBuffer> cb = [q commandBuffer];
+        id<MTLRenderCommandEncoder> e = [r beginPass:(Rec){pass, sizeof pass} task:9 commandBuffer:cb];
+        assert(e && r->pass_clears_magenta);
+        if (valid) {
+            uint32_t pref = 72;
+            [r render:e tag:116 rec:(Rec){(uint8_t *)&pref, sizeof pref} task:9];
+        }
+        uint16_t quad[] = {MTLPrimitiveTypeTriangleStrip, 0, 0, 4};
+        [r render:e tag:1 rec:(Rec){(uint8_t *)quad, sizeof quad} task:9];
+        [e endEncoding];
+        id<MTLBlitCommandEncoder> b = [cb blitCommandEncoder];
+        [b copyFromTexture:target sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(64, 32, 1)
+                 toBuffer:pixels destinationOffset:0 destinationBytesPerRow:256 destinationBytesPerImage:8192];
+        [b endEncoding]; [cb commit]; [cb waitUntilCompleted];
+        assert(cb.status == MTLCommandBufferStatusCompleted);
+        const uint8_t *pixel = (const uint8_t *)pixels.contents + 16 * 256 + 32 * 4;
+        assert(pixel[0] == (valid ? 0 : 255) && pixel[1] == (valid ? 255 : 0) && pixel[2] == (valid ? 0 : 255) && pixel[3] == 255);
+    }
+    assert(r->skipped_render_draws == 1 && r->draws == 1);
+    puts("PASS: native magenta-clear/missing-draw reproduction, successful green draw and metadata diagnostics");
+}
+
 int main(void) {
     alarm(30);
     @autoreleasepool {
@@ -136,6 +211,8 @@ int main(void) {
             bytes[i] = 1; assert(hash_bytes(bytes, sizeof bytes) != initial); bytes[i] = 0;
         }
         test_view_reuse(device); test_planes(device); test_invalid_mapping(device); test_surface_identity();
+        test_missing_pipeline_diagnostics();
+        test_guest_magenta_clear(device);
         puts("PASS: every-byte updates, dirty-plane preservation, upload fence, invalid plane, reused parent views, invalid mapping rejection, complete backing identity");
     }
     return 0;
