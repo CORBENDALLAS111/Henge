@@ -110,7 +110,7 @@ test-pvg-surfaces: $(B)/test_pvg_surfaces
 	$(B)/test_pvg_surfaces
 .PHONY: test-pvg-surfaces
 
-$(B)/test_absolute_pen: tests/test_absolute_pen.c devices/xhci.c devices/xhci.h devices/absolute_pen.h | $(B)
+$(B)/test_absolute_pen: tests/test_absolute_pen.c devices/xhci.c devices/xhci.h devices/absolute_pen.h devices/usb_gamepad.h | $(B)
 	$(CC) $(CFLAGS) -pthread tests/test_absolute_pen.c -o $@
 
 test-absolute-pen: $(B)/test_absolute_pen
@@ -312,3 +312,27 @@ $(B)/test_software_identity: tests/test_software_identity.swift ios/Henge/Softwa
 test-software-identity: $(B)/test_software_identity
 	$(B)/test_software_identity
 .PHONY: test-legacy-vmm test-legacy-dtree test-compat test-software-identity
+
+$(B)/test_pencil_proximity: ios/Henge/PencilProximity.swift tests/test_pencil_proximity.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-pencil-proximity: $(B)/test_pencil_proximity
+	$(B)/test_pencil_proximity
+.PHONY: test-pencil-proximity
+
+$(B)/test_shared_files: ios/Henge/SharedFileStore.swift tests/test_shared_files.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-shared-files: $(B)/test_shared_files
+	$(B)/test_shared_files
+.PHONY: test-shared-files
+
+$(B)/test_usb_gamepad: tests/test_usb_gamepad.c devices/xhci.c devices/xhci.h devices/usb_gamepad.h | $(B)
+	$(CC) $(CFLAGS) -pthread tests/test_usb_gamepad.c -o $@
+test-usb-gamepad: $(B)/test_usb_gamepad
+	$(B)/test_usb_gamepad
+.PHONY: test-usb-gamepad
+
+$(B)/test_gamepad_sample: ios/Henge/GamepadSample.swift tests/test_gamepad_sample.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-gamepad-sample: $(B)/test_gamepad_sample
+	$(B)/test_gamepad_sample
+.PHONY: test-gamepad-sample

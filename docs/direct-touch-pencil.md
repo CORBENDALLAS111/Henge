@@ -71,7 +71,7 @@ for running Ventura's actual driver.
 ## Verification boundary
 
 Automated checks exercise the production xHCI controller against guest RAM:
-descriptors, three-port enumeration capability, driver readiness, report contents,
+descriptors, USB port enumeration capability, driver readiness, report contents,
 button edges, motion coalescing, cancel at delivered position, overflow release,
 endpoint interruption, unconfiguration and reset. Swift mapping tests cover
 coordinates, out-of-bounds/nonfinite input, pressure, tilt and barrel roll. Full
@@ -89,3 +89,10 @@ Guest driver binding, absolute-position calibration, clicking, long presses,
 window/icon dragging, text selection, multi-finger scroll, zoom, rotation,
 Pencil hover/pressure/tilt/roll, double-tap/squeeze and switching to/from a physical
 mouse still need on-device verification. The new path remains experimental.
+
+
+Pencil now also overlays the Mac image in Trackpad mode while finger coordinates
+retain the existing trackpad rectangle. Hover/contact ordering, current-sample
+corrections and post-lift proximity lifetime are described and tested in
+[pencil-devices-files.md](pencil-devices-files.md). This build adds a separate
+USB gamepad on port 4; the pen's report descriptor remains unchanged.
