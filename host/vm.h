@@ -98,6 +98,9 @@ void hv_vm_key(uint16_t code, int down);
 void hv_vm_key_hid(uint8_t usage, int down); /* HID keyboard usage, which is what iOS reports for a hardware keyboard */
 void hv_vm_mouse_move(int dx, int dy);
 void hv_vm_pointer_reset(void); /* discard queued pointer input and release buttons */
+int hv_vm_pen_ready(void);
+int hv_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags);
+void hv_vm_pen_cancel(void);
 void hv_vm_mouse_button(int button, int down); /* 0 left, 1 right, 2 middle */
 void hv_vm_mouse_wheel(int dy);
 void hv_vm_mouse_hwheel(int dx);

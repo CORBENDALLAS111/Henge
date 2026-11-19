@@ -101,6 +101,12 @@ struct SessionView: View {
                     Trackpad(isActive: touchInputActive)
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
+                    if touchMode == "direct" && !display.isExternal {
+                        DirectTouchSurface(isActive: touchInputActive)
+                            .frame(width: layout.screen.width, height: layout.screen.height)
+                            .position(x: layout.screen.midX, y: layout.screen.midY)
+                            .accessibilityLabel("Direct Mac touch and Apple Pencil surface")
+                    }
                     if inputMode == .volumeButtons && volumeMode == .intercept {
                         // The capture interaction must live in the SwiftUI hierarchy to receive
                         // the volume-button events; it passes touches through to the trackpad.
@@ -183,7 +189,7 @@ struct SessionView: View {
         } message: {
             Text("This turns the Mac off at once. Anything not saved on it is lost.")
         }
-        .onChange(of: zoomed) { on in
+        .onChange(of: zoomed && (touchMode != "direct" || display.isExternal)) { on in
             zoomFollowing?.cancel()
             zoomFollowing = on ? Task { await followPointer() } : nil
         }
@@ -517,10 +523,10 @@ struct SessionView: View {
                 Section("Touch Controls") {
                     Picker("Mode", selection: $touchMode) {
                         Text("Trackpad").tag("trackpad")
-                        Text("Direct Touch (fallback)").tag("direct")
+                        Text("Direct Touch").tag("direct")
                     }
                     .pickerStyle(.segmented)
-                    Text(touchMode == "direct" ? TouchInputSafety.fallbackDescription
+                    Text(touchMode == "direct" ? TouchInputSafety.directDescription
                          : "Swipe to move the pointer; tap to click, hold then move to drag. Touch input pauses while a physical mouse is connected.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

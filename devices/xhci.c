@@ -133,10 +133,40 @@ struct HvXhciDev {
     const uint8_t *report_desc;
     unsigned report_desc_len;
 };
+static const uint8_t pen_device_desc[18] = {
+    18,1,0x00,0x02,0,0,0,64, 0x09,0x12,0x01,0x00, 0x00,0x01,1,2,3,1
+};
+static const uint8_t pen_config_desc[34] = {
+    9,2,34,0,1,1,0,0x80,50,
+    9,4,0,0,1,3,0,0,0,
+    9,0x21,0x11,0x01,0,1,0x22,sizeof hv_pen_descriptor,0,
+    7,5,0x81,3,64,0,HV_PEN_INTERVAL_MS
+};
+static const char *const pen_strings[] = {NULL,"HengeVM","Henge Absolute Pen","1"};
 static const struct HvXhciDev devs[HV_XHCI_DEVICES] = {
     {kbd_strings, kbd_device_desc, kbd_config_desc, kbd_report_desc, sizeof kbd_report_desc},
     {tp_strings, tp_device_desc, tp_config_desc, tp_report_desc, sizeof tp_report_desc},
+    {pen_strings, pen_device_desc, pen_config_desc, hv_pen_descriptor, sizeof hv_pen_descriptor},
 };
+
+/* USB reset/unconfiguration discards the device's old report state. Host input
+   rechecks readiness under the same lock, so it cannot cross a reset. */
+static void pen_detach(HvXhci *x) {
+    pthread_mutex_lock(&x->mu);
+    atomic_store(&x->pen_ready, 0);
+    x->pen_head = x->pen_tail = 0;
+    x->pen_blocked = 0;
+    x->pen_last_report_ns = 0;
+    memset(x->pen_state, 0, sizeof x->pen_state);
+    memset(x->pen_delivered_state, 0, sizeof x->pen_delivered_state);
+    pthread_mutex_unlock(&x->mu);
+}
+
+/* Endpoint interruption keeps a release for the guest to receive on restart. */
+static void pen_pause(HvXhci *x) {
+    atomic_store(&x->pen_ready, 0);
+    hv_xhci_pen_cancel(x);
+}
 
 static int xlog(void) {
     static int on = -1;
@@ -367,12 +397,20 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
         src = tmp, len = 1;
     } else if (type == 0x00 && req == 9) { /* SET_CONFIGURATION */
         x->slots[slot].configured = value & 0xff;
+        if (x->slots[slot].dev == 2 && !value) pen_detach(x);
         return 0;
     } else if (type == 0x81 && req == 10) { /* GET_INTERFACE */
         tmp[0] = 0;
         src = tmp, len = 1;
     } else if (type == 0xa1 && req == 1) { /* GET_REPORT: wValue is (type << 8) | report ID */
         if (x->slots[slot].dev == 0) src = x->state, len = 8;
+        else if (x->slots[slot].dev == 2) {
+            if ((value >> 8) != 1 || (value & 0xff)) return -1;
+            pthread_mutex_lock(&x->mu);
+            memcpy(tmp, x->pen_state, HV_PEN_REPORT_LEN);
+            pthread_mutex_unlock(&x->mu);
+            src = tmp; len = HV_PEN_REPORT_LEN;
+        }
         else {
             int rtype = value >> 8, rid = value & 0xff;
             if (rtype == 3) { /* feature: the sensor-configuration registers */
@@ -484,6 +522,12 @@ static void run_ep0(HvXhci *x, int slot) {
     }
 }
 
+static uint64_t pen_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000 + (uint64_t)ts.tv_nsec;
+}
+
 /* Give the device's waiting reports to the interrupt IN endpoint's posted transfers. */
 static void run_ep_in(HvXhci *x, int slot) {
     struct HvXhciSlot *s = &x->slots[slot];
@@ -506,6 +550,37 @@ static void run_ep_in(HvXhci *x, int slot) {
             x->rhead++;
             x->delivered++;
             transfer_event(x, at, n < want ? CC_SHORT_PACKET : CC_SUCCESS, want - n, slot, dci);
+        }
+    } else if (s->dev == 2) {
+        if (!s->configured) { pthread_mutex_unlock(&x->mu); return; }
+        if (ring_peek(x, r, trb, &at) && ((trb[3] >> 10) & 0x3f) == TRB_NORMAL && (trb[2] & 0x1ffff) >= HV_PEN_REPORT_LEN) {
+            if (!atomic_exchange(&x->pen_ready, 1) && x->pen_ready_logs++ < 4)
+                fprintf(stderr, "hengevm: xhci: absolute pen: guest IN endpoint ready (slot %d)\n", slot);
+        }
+        while (x->pen_head != x->pen_tail && ring_peek(x, r, trb, &at)) {
+            if (((trb[3] >> 10) & 0x3f) != TRB_NORMAL) { ring_advance(r); continue; }
+            /* This is a full-speed interrupt endpoint, not a bulk stream.
+               Sending a short tap's down/up/leave in one controller pass
+               violates bInterval and gives the guest no separate USB samples.
+               Do not consume its TRB until the next service interval. The
+               regular device poll handles pending input without sleeping here.
+               A backwards host clock after snapshot restore is immediately due. */
+            uint64_t now = pen_now_ns(), previous = x->pen_last_report_ns;
+            if (previous && now >= previous && now - previous < (uint64_t)HV_PEN_INTERVAL_MS * 1000000) break;
+            ring_advance(r);
+            uint32_t want = trb[2] & 0x1ffff;
+            uint32_t n = want < HV_PEN_REPORT_LEN ? want : HV_PEN_REPORT_LEN;
+            uint8_t *report = x->pen_reports[x->pen_head++ % HV_PEN_REPORTS];
+            wr(x, (uint64_t)trb[1] << 32 | trb[0], report, n);
+            memcpy(x->pen_delivered_state, report, HV_PEN_REPORT_LEN);
+            x->pen_last_report_ns = now;
+            x->pen_delivered++;
+            if (x->pen_delivered <= 12)
+                fprintf(stderr, "hengevm: xhci: absolute pen: report delivered (%llu) flags=%02x interval_us=%llu\n",
+                        (unsigned long long)x->pen_delivered, report[0],
+                        (unsigned long long)(previous && now >= previous ? (now - previous) / 1000 : 0));
+            transfer_event(x, at, n < want ? CC_SHORT_PACKET : CC_SUCCESS, want - n, slot, dci);
+            break; /* at most one pen report in this service interval */
         }
     } else {
         while (x->tp_rhead != x->tp_rtail && ring_peek(x, r, trb, &at)) {
@@ -575,12 +650,14 @@ static int configure_endpoints(HvXhci *x, int slot, uint64_t input, int deconfig
     struct HvXhciSlot *s = &x->slots[slot];
     uint64_t out = out_ctx(x, slot);
     if (deconfigure) {
+        if (s->dev == 2) pen_pause(x);
         for (int dci = 2; dci < HV_XHCI_EPS; dci++) s->ep_running[dci] = 0;
         return CC_SUCCESS;
     }
     uint32_t drop = rd32(x, input), add = rd32(x, input + 4);
     for (int dci = 2; dci < HV_XHCI_EPS; dci++) {
         if (drop & (1u << dci)) {
+            if (s->dev == 2) pen_pause(x);
             s->ep_running[dci] = 0;
             uint8_t zero[32] = {0};
             wr(x, out + 32ull * dci, zero, 32);
@@ -638,6 +715,7 @@ static void run_commands(HvXhci *x) {
         }
         case TRB_DISABLE_SLOT:
             if (slot >= 1 && slot <= HV_XHCI_SLOTS) {
+                if (x->slots[slot].dev == 2) pen_detach(x);
                 x->slot_used[slot] = 0;
                 x->slots[slot].dev = -1;
                 memset(x->slots[slot].ep_running, 0, sizeof x->slots[slot].ep_running);
@@ -660,11 +738,13 @@ static void run_commands(HvXhci *x) {
         }
         case TRB_RESET_EP: {
             int dci = (trb[3] >> 16) & 0x1f;
+            if (x->slots[slot].dev == 2 && dci > 1) pen_pause(x);
             set_ep_state(x, slot, dci, 3); /* stopped */
             break;
         }
         case TRB_STOP_EP: {
             int dci = (trb[3] >> 16) & 0x1f;
+            if (x->slots[slot].dev == 2 && dci > 1) pen_pause(x);
             x->slots[slot].ep_running[dci] = 0;
             set_ep_state(x, slot, dci, 3);
             /* The dequeue pointer goes back into the context for the driver to read. */
@@ -681,6 +761,7 @@ static void run_commands(HvXhci *x) {
             break;
         }
         case TRB_RESET_DEVICE: {
+            if (x->slots[slot].dev == 2) pen_detach(x);
             for (int dci = 2; dci < HV_XHCI_EPS; dci++) x->slots[slot].ep_running[dci] = 0;
             uint32_t dw3 = (uint32_t)1 << 27; /* default state, address 0 */
             wr(x, out_ctx(x, slot) + 12, &dw3, 4);
@@ -700,11 +781,11 @@ static void run_commands(HvXhci *x) {
 
 /* ---- ports ---- */
 
-/* Port 1 is the full-speed keyboard; port 2 is the high-speed trackpad, as the real
-   Magic Trackpad 2 is. */
+/* Port 1 is the full-speed keyboard; port 2 is the high-speed Magic Trackpad 2;
+   port 3 is the full-speed absolute pen. */
 static void port_connect(HvXhci *x) {
     for (int p = 0; p < HV_XHCI_PORTS; p++) {
-        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
+        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p == 1 ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
         port_event(x, p);
     }
 }
@@ -715,6 +796,13 @@ static void port_write(HvXhci *x, int p, uint32_t v) {
     s &= ~(v & PORT_CHANGES); /* write 1 to clear */
     if (v & PORT_PED) s &= ~PORT_PED;
     if (v & PORT_PR) { /* reset: enabled, in U0 */
+        if (p == 2) {
+            pen_detach(x);
+            for (int slot = 1; slot <= HV_XHCI_SLOTS; slot++) if (x->slots[slot].dev == 2) {
+                x->slots[slot].configured = 0;
+                for (int dci = 2; dci < HV_XHCI_EPS; dci++) x->slots[slot].ep_running[dci] = 0;
+            }
+        }
         s = (s & ~(0xfu << PORT_PLS_SHIFT)) | PORT_PED | PORT_PRC;
         x->portsc[p] = s;
         port_event(x, p);
@@ -760,8 +848,11 @@ static void reset(HvXhci *x) {
     x->tp_db = 0;
     x->tp_multi_logs = 0;
     x->tp_f1_len = 0;
+    pen_detach(x);
+    x->pen_delivered = x->pen_overflows = 0;
+    x->pen_ready_logs = 0;
     for (int p = 0; p < HV_XHCI_PORTS; p++)
-        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
+        x->portsc[p] = PORT_PP | PORT_CCS | PORT_CSC | (uint32_t)(p == 1 ? SPEED_HIGH : SPEED_FULL) << PORT_SPEED_SHIFT | 7u << PORT_PLS_SHIFT;
     update_irq(x);
 }
 
@@ -789,7 +880,7 @@ static uint64_t bar_read(HvPciDev *d, int bar, uint64_t off, unsigned size) {
         if (size == 8 && i + 1 < 8) v |= (uint64_t)cap[i + 1] << 32;
         v >>= 8 * (off & 3);
     } else if (off >= XECP && off < XECP + 16) { /* Supported Protocol: USB 2.0 on every port */
-        static const uint32_t ext[4] = {2u | 0x0200u << 16, 0x20425355, 1u | ((1u << HV_XHCI_PORTS) - 1u) << 8, 0};
+        static const uint32_t ext[4] = {2u | 0x0200u << 16, 0x20425355, 1u | (uint32_t)HV_XHCI_PORTS << 8, 0};
         uint32_t i = (uint32_t)(off - XECP) / 4;
         v = ext[i];
         if (size == 8 && i + 1 < 4) v |= (uint64_t)ext[i + 1] << 32;
@@ -929,6 +1020,64 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
             else run_ep_in(x, slot);
         }
     }
+}
+
+/* Absolute pen samples. Coalesce only motion following an already queued
+   contact edge; the initial down position and every button/proximity edge stay
+   ordered. Cancellation releases at the last DELIVERED position, not a queued
+   future position, so changing input owners never teleports the cursor. */
+static void pen_cancel_locked(HvXhci *x) {
+    x->pen_head = x->pen_tail = 0;
+    memcpy(x->pen_state, x->pen_delivered_state, HV_PEN_REPORT_LEN);
+    if (x->pen_state[0] & HV_PEN_RANGE) {
+        x->pen_state[0] &= HV_PEN_RANGE | HV_PEN_INVERT;
+        x->pen_state[5] = x->pen_state[6] = 0;
+        memcpy(x->pen_reports[x->pen_tail++], x->pen_state, HV_PEN_REPORT_LEN);
+        x->pen_state[0] = 0;
+        memcpy(x->pen_reports[x->pen_tail++], x->pen_state, HV_PEN_REPORT_LEN);
+    }
+}
+
+int hv_xhci_pen_ready(HvXhci *x) { return x && atomic_load(&x->pen_ready); }
+
+void hv_xhci_pen_cancel(HvXhci *x) {
+    if (!x) return;
+    pthread_mutex_lock(&x->mu);
+    pen_cancel_locked(x);
+    x->pen_blocked = 0;
+    pthread_mutex_unlock(&x->mu);
+    hv_machine_wake(x->m);
+}
+
+int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y, int twist, int flags) {
+    if (!hv_xhci_pen_ready(x)) return -1;
+    uint8_t sample[HV_PEN_REPORT_LEN];
+    hv_pen_report(sample, px, py, pressure, tilt_x, tilt_y, twist, flags);
+    pthread_mutex_lock(&x->mu);
+    if (!atomic_load(&x->pen_ready)) { pthread_mutex_unlock(&x->mu); return -1; }
+    if (x->pen_blocked && (sample[0] & HV_PEN_TIP)) { pthread_mutex_unlock(&x->mu); return -1; }
+    x->pen_blocked = 0;
+    uint32_t count = x->pen_tail - x->pen_head;
+    uint8_t last = count ? x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS][0] : x->pen_delivered_state[0];
+    uint8_t before = count > 1 ? x->pen_reports[(x->pen_tail - 2) % HV_PEN_REPORTS][0] : x->pen_delivered_state[0];
+    if (count && last == sample[0] && before == last) {
+        memcpy(x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS], sample, HV_PEN_REPORT_LEN);
+    } else if (count == HV_PEN_REPORTS) {
+        pen_cancel_locked(x);
+        x->pen_blocked = 1;
+        x->pen_overflows++;
+        if (x->pen_overflows <= 4)
+            fprintf(stderr, "hengevm: xhci: absolute pen: queue overflow; contact cancelled\n");
+        pthread_mutex_unlock(&x->mu);
+        hv_machine_wake(x->m);
+        return -1;
+    } else {
+        memcpy(x->pen_reports[x->pen_tail++ % HV_PEN_REPORTS], sample, HV_PEN_REPORT_LEN);
+    }
+    memcpy(x->pen_state, sample, HV_PEN_REPORT_LEN);
+    pthread_mutex_unlock(&x->mu);
+    hv_machine_wake(x->m);
+    return 0;
 }
 
 /* ---- the keyboard's reports ---- */

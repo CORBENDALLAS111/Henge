@@ -103,10 +103,10 @@ struct SettingsView: View {
                 Section("Touch Controls") {
                     Picker("Control method", selection: $touchMode) {
                         Text("Trackpad").tag("trackpad")
-                        Text("Direct Touch (fallback)").tag("direct")
+                        Text("Direct Touch").tag("direct")
                     }
                     .pickerStyle(.segmented)
-                    Text(touchMode == "direct" ? TouchInputSafety.fallbackDescription
+                    Text(touchMode == "direct" ? TouchInputSafety.directDescription
                          : "Swipe to move the pointer; tap to click or hold then move to drag. Touch input pauses while a physical mouse is connected.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

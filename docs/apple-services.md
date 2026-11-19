@@ -1,9 +1,24 @@
 # Apple services in Henge
 
 Apple Account and Mac App Store login have **not** been verified. The existing
-README reports a verification error. No guest account-service logs, affected VM
-or signed-in device were available for this investigation, so its exact error
-domain/code and any concurrent network failure remain unknown.
+README reports a verification error. The user subsequently supplied a Ventura
+App Store screenshot with the exact message **"MID is invalid."** The catalog
+behind the dialog has loaded, but catalog access does not verify authenticated
+services. No guest account-service logs or affected VM were available, so the
+underlying error domain/code and any concurrent transport failure remain unknown.
+Account details from the screenshot are deliberately not reproduced here.
+
+## Observed machine-identity rejection
+
+"MID is invalid" is an identity-related sign-in rejection, rather than a report
+of a bad password, missing DNS answer or failed certificate. It does not reveal
+which internal identifier/provisioning check Apple rejected. Henge currently has
+no supported way to provision an Apple-authenticated machine identity for this
+Ventura guest. No local change in this branch repairs or bypasses that rejection,
+and no successful Apple Account or App Store sign-in is claimed. Network repairs
+can address a separately demonstrated transport fault; they cannot supply the
+missing service authorization. Preserve the VM's existing auxiliary storage and
+Keychain rather than regenerating identifiers or deleting account state.
 
 ## What the code establishes
 

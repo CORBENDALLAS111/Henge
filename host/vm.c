@@ -744,6 +744,7 @@ void hv_vm_mouse_button(int button, int down) {
 
 void hv_vm_pointer_reset(void) {
     if (atomic_load(&input_stopping)) return;
+    hv_xhci_pen_cancel(board.usb);
     atomic_fetch_add(&pointer_generation, 1);
     dispatch_async(pointer_queue(), ^{
         if (atomic_load(&input_stopping)) return;
@@ -754,6 +755,13 @@ void hv_vm_pointer_reset(void) {
         rctrl_hold(&rctrl_click, 0);
     });
 }
+
+int hv_vm_pen_ready(void) { return !atomic_load(&input_stopping) && hv_xhci_pen_ready(board.usb); }
+int hv_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags) {
+    if (atomic_load(&input_stopping)) return -1;
+    return hv_xhci_pen(board.usb, x, y, pressure, tilt_x, tilt_y, twist, flags);
+}
+void hv_vm_pen_cancel(void) { if (!atomic_load(&input_stopping)) hv_xhci_pen_cancel(board.usb); }
 
 /* The guest takes a wheel event as 8 bits: -200 arrives as +56, the wrong way. So big moves go in pieces. */
 static void wheel(uint16_t axis, int amount) {

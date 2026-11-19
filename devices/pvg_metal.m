@@ -157,6 +157,11 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
     id<MTLCommandBuffer> last_cb;
     double encode_time, gpu_wait_time;
     BOOL pipeline_set; /* in the open encoder */
+    uint32_t pipeline_ref, pass_ref;
+    NSUInteger pass_width, pass_height, pass_format;
+    BOOL pass_clears_magenta;
+    uint64_t skipped_render_draws, skipped_compute_dispatches;
+    NSMutableSet<NSString *> *replay_notes;
     BOOL tess_factors; /* so is a tessellation factor buffer */
     uint32_t pre_raster_samples, pre_imageblock, pre_threadgroup, pre_tile_w, pre_tile_h; /* for the next pass */
     BOOL tracing; /* HV_PVG_TRACE_FILE exists: say what each exec draws */
@@ -201,6 +206,7 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
     dispatch_source_t shot_timer;
 }
 - (void)complain:(NSString *)what;
+- (void)noteReplay:(NSString *)event task:(uint32_t)task tag:(uint32_t)tag;
 - (HvObject *)object:(uint32_t)ref task:(uint32_t)task;
 - (void)drawCursor;
 - (BOOL)hasDisplayLayer;
@@ -436,6 +442,22 @@ static MTLTextureDescriptor *descriptor_v2(const uint8_t *d) {
     fprintf(stderr, "hengevm: pvg-metal: %s\n", what.UTF8String);
 }
 
+/* Metadata only: unlike HV_PVG_TRACE_FILE, this never prints buffer bytes,
+   shader data or screen pixels. Include failures previously returned silently,
+   so a "0 failed" Metal tally cannot disguise guest draws we never submitted. */
+- (void)noteReplay:(NSString *)event task:(uint32_t)task tag:(uint32_t)tag {
+    if (!replay_notes) replay_notes = [NSMutableSet new];
+    if (replay_notes.count >= 64) return;
+    NSString *key = [NSString stringWithFormat:@"%@/%u/%u/%lu/%lu/%lu", event, task, pipeline_ref,
+                     (unsigned long)pass_width, (unsigned long)pass_height, (unsigned long)pass_format];
+    if ([replay_notes containsObject:key]) return;
+    [replay_notes addObject:key];
+    fprintf(stderr, "hengevm: pvg-replay: event=%s task=%u command=%u pipeline=%u pass_ref=%u target=%lux%lu format=%lu guest_clear_magenta=%d old_driver=%d\n",
+            event.UTF8String, task, tag, pipeline_ref, pass_ref,
+            (unsigned long)pass_width, (unsigned long)pass_height, (unsigned long)pass_format,
+            (int)pass_clears_magenta, hv_pvg_lite_old_driver(lite));
+}
+
 /* A kernel that does nothing. Metal's deserializer aborts the whole app when a compute pipeline's function is nil, which
    happens when this OS cannot load the library macOS sent ("This library format is not supported on this platform", seen on
    iPadOS 17 with macOS 15). The lookup has failed either way, so makeSerialized drops the pipeline: a missing effect, not a
@@ -514,7 +536,12 @@ static MTLTextureDescriptor *descriptor_v2(const uint8_t *d) {
             [lib writeToFile:[dir stringByAppendingPathComponent:name] atomically:NO];
         }
     }
-    return [library newFunctionWithName:library.functionNames.firstObject];
+    id<MTLFunction> function = [library newFunctionWithName:library.functionNames.firstObject];
+    if (!function || library.functionNames.count != 1)
+        [self complain:[NSString stringWithFormat:@"function lookup task=%u record=%llu function_count=%lu selected_type=%lu resolved=%d",
+                        task, (unsigned long long)at, (unsigned long)library.functionNames.count,
+                        (unsigned long)function.functionType, function != nil]];
+    return function;
 }
 
 - (id)makeSerialized:(uint64_t)at length:(uint32_t)size task:(uint32_t)task {
@@ -530,13 +557,13 @@ static MTLTextureDescriptor *descriptor_v2(const uint8_t *d) {
         id descriptor = tag == 0xe ? [spi newRenderPipelineDescriptorWithSerializedData:data deserializationContext:ctx]
                                    : [spi newTileRenderPipelineDescriptorWithSerializedData:data deserializationContext:ctx];
         if (!descriptor || ctx->failure) {
-            [self complain:[NSString stringWithFormat:@"pipeline descriptor %u: %@", tag, ctx->failure]];
+            [self complain:[NSString stringWithFormat:@"pipeline descriptor task=%u ref=%u tag=%u: %@", task, w[2], tag, ctx->failure]];
             return nil;
         }
         NSError *err = nil;
         id state = tag == 0xe ? [device newRenderPipelineStateWithDescriptor:descriptor error:&err]
                               : [device newRenderPipelineStateWithTileDescriptor:descriptor options:MTLPipelineOptionNone reflection:nil error:&err];
-        if (!state) [self complain:[NSString stringWithFormat:@"pipeline %u: %@", tag, err.localizedDescription]];
+        if (!state) [self complain:[NSString stringWithFormat:@"pipeline task=%u ref=%u tag=%u: %@", task, w[2], tag, err.localizedDescription]];
         if (tag == 0xe && getenv("HV_SHADER_DUMP") && atoi(getenv("HV_SHADER_DUMP"))) { /* m4 fork: blend state as this iOS read it */
             MTLRenderPipelineDescriptor *rp = descriptor;
             for (int i = 0; i < 4; i++) {
@@ -563,12 +590,12 @@ static MTLTextureDescriptor *descriptor_v2(const uint8_t *d) {
         ctx->standIn = [self computeStandIn];
         id descriptor = [spi newComputePipelineDescriptorWithSerializedData:data deserializationContext:ctx];
         if (!descriptor || ctx->failure) {
-            [self complain:[NSString stringWithFormat:@"compute descriptor: %@", ctx->failure]];
+            [self complain:[NSString stringWithFormat:@"compute descriptor task=%u ref=%u: %@", task, w[2], ctx->failure]];
             return nil;
         }
         NSError *err = nil;
         id state = [device newComputePipelineStateWithDescriptor:descriptor options:MTLPipelineOptionNone reflection:nil error:&err];
-        if (!state) [self complain:[NSString stringWithFormat:@"compute pipeline: %@", err.localizedDescription]];
+        if (!state) [self complain:[NSString stringWithFormat:@"compute pipeline task=%u ref=%u: %@", task, w[2], err.localizedDescription]];
         else objc_setAssociatedObject(state, "hvname", [NSString stringWithFormat:@"compute %@", [[descriptor computeFunction] name]], OBJC_ASSOCIATION_RETAIN);
         return state;
     }
@@ -1312,6 +1339,9 @@ typedef struct {
 #define U64(off) ({ uint64_t _v; memcpy(&_v, r.p + (off), 8); _v; })
 
 - (id<MTLRenderCommandEncoder>)beginPass:(Rec)r task:(uint32_t)task commandBuffer:(id<MTLCommandBuffer>)cb {
+    pipeline_ref = pass_ref = 0;
+    pass_width = pass_height = pass_format = 0;
+    pass_clears_magenta = NO;
     MTLRenderPassDescriptor *d = [MTLRenderPassDescriptor renderPassDescriptor];
 #define ATTACH(a, o)                                                 \
     do {                                                             \
@@ -1338,6 +1368,12 @@ typedef struct {
         double col[4];
         memcpy(col, r.p + o + 0x1c, sizeof col);
         c.clearColor = MTLClearColorMake(col[0], col[1], col[2], col[3]);
+        if (i == 0) {
+            pass_ref = U32(o);
+            pass_width = c.texture.width; pass_height = c.texture.height; pass_format = c.texture.pixelFormat;
+            pass_clears_magenta = c.loadAction == MTLLoadActionClear && col[0] >= 0.99 && col[1] <= 0.01 &&
+                                  col[2] >= 0.99 && col[3] >= 0.99;
+        }
     }
     /* Memoryless and resolve store actions want the matching textures; a pass with none stays dontCare. */
     for (int i = 0; i < 8; i++) {
@@ -1415,6 +1451,7 @@ typedef struct {
         return nil;
     }
     if (!named && !d.defaultRasterSampleCount) d.defaultRasterSampleCount = 1;
+    if (pass_clears_magenta) [self noteReplay:@"guest-magenta-clear" task:task tag:26];
     if (tracing) {
         id<MTLTexture> c0 = d.colorAttachments[0].texture;
         MTLClearColor cc = d.colorAttachments[0].clearColor;
@@ -1454,7 +1491,11 @@ typedef struct {
 
 - (void)render:(id<MTLRenderCommandEncoder>)e tag:(uint32_t)tag rec:(Rec)r task:(uint32_t)task {
     BOOL draw = tag <= 19 || tag == 28 || tag == 29 || tag == 155 || tag == 162;
-    if (!pipeline_set && draw) return;
+    if (!pipeline_set && draw) {
+        skipped_render_draws++;
+        [self noteReplay:@"draw-without-pipeline" task:task tag:tag];
+        return;
+    }
     if (tracing && draw) fprintf(stderr, "trace:  draw tag %u\n", tag);
     switch (tag) {
     case 24: { /* {fence, stages} */
@@ -1474,6 +1515,7 @@ typedef struct {
         if (r.size >= 4 + U32(0) * 4ull) [self useHeaps:(const uint32_t *)(r.p + 4) count:U32(0) task:task encoder:e stages:-1];
         break;
     case 116: { /* Metal crashes on a missing pipeline, and on drawing without one */
+        pipeline_ref = U32(0);
         id state = [self get:U32(0) task:task];
         if (state) [e setRenderPipelineState:state];
         pipeline_set = state != nil;
@@ -1836,7 +1878,11 @@ typedef struct {
 
 /* Compute calls. Tags start at 200. */
 - (void)compute:(id<MTLComputeCommandEncoder>)e tag:(uint32_t)tag rec:(Rec)r task:(uint32_t)task {
-    if (!pipeline_set && (tag == 200 || tag == 202)) return;
+    if (!pipeline_set && (tag == 200 || tag == 202)) {
+        skipped_compute_dispatches++;
+        [self noteReplay:@"dispatch-without-pipeline" task:task tag:tag];
+        return;
+    }
     switch (tag) {
     case 209: {
         MTLRegion region;
@@ -1861,6 +1907,7 @@ typedef struct {
         break;
     }
     case 208: {
+        pipeline_ref = U32(0);
         id state = [self get:U32(0) task:task];
         if (state) [e setComputePipelineState:state];
         pipeline_set = state != nil;
@@ -2214,7 +2261,13 @@ typedef struct {
             }
             continue;
         }
-        if (!e && type == 1) e = [cb computeCommandEncoder], pipeline_set = NO;
+        if (!e && type == 1) {
+            e = [cb computeCommandEncoder];
+            pipeline_set = NO;
+            pipeline_ref = pass_ref = 0;
+            pass_width = pass_height = pass_format = 0;
+            pass_clears_magenta = NO;
+        }
         if (!e && type == 2) e = [cb blitCommandEncoder];
         etype = type;
         @try {
@@ -2271,7 +2324,7 @@ typedef struct {
     if (++execs % 2000 == 0) {
         static double t0;
         if (!t0) t0 = now_seconds();
-        fprintf(stderr, "hengevm: pvg-metal: %llu execs, %llu draws, %llu failed, %llu synced, %llu remaps, %.0f s; encoding %.2f s, waiting for the GPU %.2f s\n", (unsigned long long)execs, (unsigned long long)draws, (unsigned long long)failed, (unsigned long long)synced, (unsigned long long)remaps, now_seconds() - t0, encode_time, gpu_wait_time);
+        fprintf(stderr, "hengevm: pvg-metal: %llu execs, %llu draws, %llu failed, %llu synced, %llu remaps, %.0f s; skipped_render=%llu skipped_compute=%llu; encoding %.2f s, waiting for the GPU %.2f s\n", (unsigned long long)execs, (unsigned long long)draws, (unsigned long long)failed, (unsigned long long)synced, (unsigned long long)remaps, now_seconds() - t0, (unsigned long long)skipped_render_draws, (unsigned long long)skipped_compute_dispatches, encode_time, gpu_wait_time);
         encode_time = gpu_wait_time = 0;
     }
     return YES;
