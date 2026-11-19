@@ -1,6 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// NSItemProvider is not Sendable. Keep its load entry points on the UI actor,
+/// including a file-promise retry requested by a background URL callback.
+@MainActor
+private final class FileRepresentationLoader {
+    private let provider: NSItemProvider
+    init(_ provider: NSItemProvider) { self.provider = provider }
+    func load(_ type: String, completion: @escaping @Sendable (URL?, Error?) -> Void) {
+        _ = provider.loadFileRepresentation(forTypeIdentifier: type, completionHandler: completion)
+    }
+}
+
 @MainActor
 final class FileTransfers: ObservableObject {
     @Published private(set) var pending = 0
@@ -48,6 +59,7 @@ final class FileTransfers: ObservableObject {
             // do not transfer a non-Sendable NSItemProvider to our worker queue.
             // Provider callbacks still copy their temporary URL before returning.
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                let loader = FileRepresentationLoader(provider)
                 provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
                     let url: URL?
                     if let value = item as? URL { url = value }
@@ -62,7 +74,7 @@ final class FileTransfers: ObservableObject {
                     // Cloud providers can vend a URL that is not readable by
                     // this process. Ask for a file promise before reporting failure.
                     if let representation {
-                        _ = provider.loadFileRepresentation(forTypeIdentifier: representation, completionHandler: finish)
+                        Task { @MainActor in loader.load(representation, completion: finish) }
                     } else { finish(nil, error) }
                 }
             } else if let type = representation {
