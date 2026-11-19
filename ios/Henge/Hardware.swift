@@ -180,6 +180,9 @@ final class HardwareMouse {
     private var lastScrollFirst: Float = 0, lastScrollSecond: Float = 0
 
     func start() {
+        // Session appearance and VM startup both call this. Re-registering
+        // would invalidate the callbacks of already attached mice.
+        guard observers.isEmpty else { return }
         let defaults = UserDefaults.standard
         inputGeneration += 1
         HengeLog.log("input", "physical mouse: raw motion; adjust tracking speed in macOS")
