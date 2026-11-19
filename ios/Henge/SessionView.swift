@@ -785,7 +785,7 @@ struct SessionView: View {
                 HardwareKeys.releaseAll()
                 resetPointerInput()
                 gamepad.stop()
-            HardwareMouse.shared.stop()
+                HardwareMouse.shared.stop()
                 UIApplication.shared.isIdleTimerDisabled = false
                 HengeLog.log("session", "showing stopped Mac: \(String(cString: henge_vm_exit_reason()))")
                 if henge_vm_exit_outcome() == Int32(HENGE_VM_OUTCOME_RESTART.rawValue) && henge_vm_can_start() != 0 {

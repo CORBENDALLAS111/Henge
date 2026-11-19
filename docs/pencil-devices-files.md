@@ -23,6 +23,8 @@ UIKit can end hover at contact and resume it after lift. Hover end now emits an
 ordered proximity leave instead of purging the native queue. Tip-up stays in
 range; a 60 ms, generation-checked grace period permits hover to resume, then
 leaves if it does not. Reset, a new stroke or a new hover invalidates the timeout.
+Starting a normal Pencil contact also preserves queued releases; cancellation
+is reserved for taking ownership from an active finger/gesture or a lifecycle reset.
 This removes a concrete queue-cancellation hazard; it does not establish the
 cause of every missed click reported by the user.
 

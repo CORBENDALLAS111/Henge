@@ -153,7 +153,12 @@ struct DirectTouchSurface: UIViewRepresentable {
             guard activeInput, !HardwareMouse.shared.hasMouse else { updateStatus(); return }
             if let pen = touches.first(where: { $0.type == .pencil }) {
                 guard usable, imageBounds.contains(pen.preciseLocation(in: self)) else { updateStatus(); return }
-                reset(); primary = pen
+                // A normal hover -> contact (or quick second stroke) must not
+                // purge the preceding tip-up still queued for the guest.
+                // Cancel only when taking ownership from an active touch.
+                if primary != nil || !fingers.isEmpty || multi { reset() }
+                pendingLeave?.cancel(); pendingLeave = nil
+                primary = pen
                 proximity.beginContact(); setPencilPresent(true)
                 pencil(pen, down: true); contact = primary != nil
                 return
