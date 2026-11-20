@@ -15,6 +15,20 @@ struct AppleAccountSetupView: View {
 
     var body: some View {
         Form {
+            if macID == nil, !machines.all.isEmpty {
+                Section("Your installed Macs") {
+                    ForEach(machines.all) { mac in
+                        NavigationLink { AppleAccountSetupView(macID: mac.id) } label: {
+                            VStack(alignment: .leading) {
+                                Text(mac.name)
+                                if let osName = mac.osName { Text(osName).font(.footnote).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }
+                    Text("Choose your existing Mac to try compatibility without reinstalling macOS.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
             if let identityPresent = profilePresent {
                 Section("This Mac") {
                     LabeledContent("Account compatibility", value: AppleAccountSupport.status(identityPresent: identityPresent, nativeStatus: nativeStatus))
@@ -32,7 +46,7 @@ struct AppleAccountSetupView: View {
                         } catch { profileError = error.localizedDescription }
                     }
                     .disabled(!canStart || installer.busy || machines.importing != nil || machines.exporting != nil || savedSession)
-                    Text("Changes apply at the next cold boot. Your installed system, apps and files stay on the same disk. The profile is saved once and reused; disabling it restores the previous virtual hardware identifiers, but does not undo changes macOS or cloud services made while it was enabled.")
+                    Text("Applies when you next start this Mac. Your system, apps and files stay on the same disk. Disabling restores the previous hardware profile. Changes made inside macOS or cloud services are kept.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if savedSession {
                         Text("Start this Mac and choose Shut Down from the Apple menu first. Its saved memory session will not be deleted to enable this feature.")

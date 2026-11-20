@@ -7,8 +7,8 @@ Install. After setup, sign in manually in macOS System Settings and App Store.
 
 ## Try an already installed Ventura Mac
 
-Open the Mac's settings (from the Macs list) → **Apple Account & App Store** →
-**Enable compatibility on this Mac**. Shut down macOS from its Apple menu first.
+Open **Settings → Apple Account & App Store**, choose your installed Mac, then
+**Enable compatibility on this Mac**. The same control is in that Mac's settings. Shut down macOS from its Apple menu first.
 If Instant Resume has a saved memory session, start that session and shut down
 normally; enabling will not delete it. Installation, import/export and any running
 or paused VM block the change. Then start the same Mac from cold, check Details
