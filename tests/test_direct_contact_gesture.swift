@@ -9,6 +9,8 @@ import CoreGraphics
             g.begin(p, tool: tool, time: 1)
             precondition(g.move(jitter).isEmpty, "jitter must never press the guest button")
             precondition(g.end(jitter, time: 1.2) == [.click(p, count: 1, secondary: false)])
+            g.begin(p, tool: tool, time: 1.5)
+            precondition(g.end(moved, time: 1.51).isEmpty, "a swipe without delivered move samples must not click")
             g.begin(p, tool: tool, time: 2)
             precondition(g.move(moved) == [.down(p), .move(moved)], "drag starts at the touched object")
             precondition(g.hold(time: 3).isEmpty, "a drag must not turn into right/double-click")

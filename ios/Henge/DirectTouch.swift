@@ -284,7 +284,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             pendingDown?.cancel(); pendingDown = nil
             showTouch(nil)
             primary = nil; contact = false; fingers.subtract(touches)
-            StickyKeys.shared.releaseAll()
+            StickyKeys.shared.releaseAfterPointer()
         }
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { reset() }
 

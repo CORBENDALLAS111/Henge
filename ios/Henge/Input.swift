@@ -177,7 +177,10 @@ final class StickyKeys: ObservableObject {
     static let shared = StickyKeys()
     @Published private(set) var down: Set<UInt16> = []
 
+    private var revision: UInt64 = 0
+
     func toggle(_ code: UInt16) {
+        revision &+= 1
         if down.contains(code) {
             henge_vm_key(code, 0)
             down.remove(code)
@@ -187,7 +190,21 @@ final class StickyKeys: ObservableObject {
         }
     }
 
+    /// Pointer reports may still be queued when the finger lifts. Keep a
+    /// sticky modifier until the click has actually reached the guest.
+    func releaseAfterPointer() {
+        guard !down.isEmpty else { return }
+        let expected = revision, deadline = ProcessInfo.processInfo.systemUptime + 1
+        func check() {
+            guard revision == expected else { return }
+            if henge_vm_pen_idle() != 0 || ProcessInfo.processInfo.systemUptime >= deadline { releaseAll() }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { check() } }
+        }
+        check()
+    }
+
     func releaseAll() {
+        revision &+= 1
         guard !down.isEmpty else { return }
         for code in down { henge_vm_key(code, 0) }
         down.removeAll()

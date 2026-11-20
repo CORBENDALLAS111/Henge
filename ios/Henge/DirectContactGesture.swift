@@ -40,7 +40,10 @@ struct DirectContactGesture {
         defer { phase = .idle }
         switch phase {
         case .pending:
-            // Never drag on lift: minor touch-up jitter remains a click at touch-down.
+            // A flick can end before UIKit supplies a move sample. It is not a
+            // stationary tap and must not click or auto-open the keyboard.
+            guard hypot(point.x - origin.x, point.y - origin.y) < (tool == .finger ? 10 : 4) else { return [] }
+            // Minor touch-up jitter remains a click at touch-down.
             let duration = time - began
             return [.click(origin, count: tool == .pencil && duration >= Self.pencilDoubleDelay ? 2 : 1,
                            secondary: tool == .finger && duration >= Self.contextDelay)]
