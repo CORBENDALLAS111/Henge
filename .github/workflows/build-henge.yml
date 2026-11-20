@@ -57,12 +57,13 @@ jobs:
         run: |
           find ios/Henge ios/HengeJITHelper -name '*.swift' -print0 | xargs -0 xcrun swiftc -frontend -parse
           bash -n tools/check-apple-services.sh
+          cmp tools/check-apple-services.sh ios/Henge/Resources/check-apple-services.sh
 
       # These fixtures need only the runner's Xcode, not the restore/dependency
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
         working-directory: Henge
-        run: make test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
+        run: make test-mdns-proxy test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
       - name: Build and verify the macOS sample disk image
         working-directory: Henge

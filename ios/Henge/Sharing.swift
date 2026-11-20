@@ -11,11 +11,19 @@ enum Sharing {
     static let setUpCommand = "curl -s http://10.0.2.4/.henge/install | sh"
     /// Less background work and drawing in macOS (host/share.c, lighten_script), and back.
     static let lightenCommand = "curl -s http://10.0.2.4/.henge/lighten | sh"
+    static let diagnosticsCommand = "curl -fsS 'http://10.0.2.4/Henge%20Support/check-apple-services.sh' | /bin/bash"
     static let unlightenCommand = "curl -s http://10.0.2.4/.henge/unlighten | sh"
 
     /// Before a Mac starts.
     static func prepare() {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let source = Bundle.main.url(forResource: "check-apple-services", withExtension: "sh") {
+            do {
+                let support = folder.appendingPathComponent("Henge Support", isDirectory: true)
+                try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+                try Data(contentsOf: source).write(to: support.appendingPathComponent("check-apple-services.sh"), options: .atomic)
+            } catch { HengeLog.log("sharing", "Could not prepare the guest diagnostics script") }
+        }
         // A Unix socket's path can't be long, so the short temporary folder.
         let socket = (NSTemporaryDirectory() as NSString).appendingPathComponent("s.sock")
         henge_vm_share(folder.path, socket, Bundle.main.path(forResource: "henge-agent", ofType: "gz"))

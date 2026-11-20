@@ -9,6 +9,8 @@
    lookup's own thread. */
 typedef void (*HvDnsSend)(const uint8_t *frame, uint32_t len, int to_guest);
 
+/* Opt-in, live; uses declared Bonjour services through the system resolver. */
+void hv_dns_proxy_set_local(int enabled);
 int hv_dns_proxy_on(void);
 /* Start a fresh network session, or stop and wait for every lookup callback.
    The caller keeps its send queues alive until stop returns. */

@@ -220,6 +220,7 @@ struct SessionView: View {
         .onReceive(NotificationCenter.default.publisher(for: TouchInputSafety.pencilPresence)) { note in
             pencilInRange = note.userInfo?["present"] as? Bool ?? false
         }
+        .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
         .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
         .onDisappear { henge_vm_set_cursor_hidden(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
@@ -594,6 +595,17 @@ struct SessionView: View {
                     Slider(value: $scrollSpeed, in: 0.1...1.5)
                     Text("The Mac supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
+                    NavigationLink("Network & Devices") {
+                        ConnectivityView(typeDiagnostics: {
+                            showDetails = false
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 600_000_000)
+                                await Keys.typeSlowly(Sharing.diagnosticsCommand)
+                            }
+                        })
+                    }
                 }
                 Section("Connected devices") {
                     LabeledContent("Keyboard", value: keyboardConnected ? "Connected through iPadOS" : "Not connected")

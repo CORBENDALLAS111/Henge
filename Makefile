@@ -344,3 +344,11 @@ $(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift tests/tes
 test-direct-contact: $(B)/test_direct_contact_gesture
 	$(B)/test_direct_contact_gesture
 .PHONY: test-direct-contact
+
+# Fake DNSService callbacks exercise production Bonjour packet code without LAN access.
+$(B)/test_mdns_proxy: tests/test_mdns_proxy.c host/dns_proxy.c host/dns_proxy.h | $(B)
+	$(CC) $(CFLAGS) -pthread tests/test_mdns_proxy.c -o $@
+
+test-mdns-proxy: $(B)/test_mdns_proxy
+	$(B)/test_mdns_proxy
+.PHONY: test-mdns-proxy

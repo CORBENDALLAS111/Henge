@@ -6,8 +6,9 @@
    iOS and macOS app uses: it knows the system's whole DNS configuration and caches.
 
    One query, one short-lived thread. The answer goes back as the frame 10.0.2.3 would have sent. A query this does
-   not understand, or one whose lookup cannot even start, goes to libslirp as before; so do .local names (asking for
-   those on iOS brings up the local network privacy prompt). */
+   not understand, or one whose lookup cannot even start, goes to libslirp as before.
+   Opt-in local discovery resolves declared Bonjour services and .local hostnames
+   through the system resolver, replying to guest mDNS on its isolated LAN. */
 #include "dns_proxy.h"
 #include "machine.h"
 
@@ -39,12 +40,15 @@ typedef struct {
     uint32_t len;
     uint32_t ip_off, udp_off, dns_off, qend; /* offsets into frame; qend: the end of the question */
     uint16_t qtype, qclass, udp_max;
-    int edns;
+    int edns, mdns;
     char name[1025];
     Answer ans[MAX_ANSWERS];
     int nans, nodata, failed, done;
     DNSServiceErrorType resolver_error;
 } Query;
+
+static atomic_int local_discovery;
+void hv_dns_proxy_set_local(int enabled) { atomic_store(&local_discovery, enabled != 0); }
 
 static atomic_int inflight, unanswered_in_a_row;
 static atomic_ullong answered, handed_back, timed_out;
@@ -215,13 +219,32 @@ static void reply(Query *q, int rcode) {
     memcpy(udp + 2, qudp, 2);
     wr16(udp + 4, udplen);
     wr16(udp + 6, 0); /* no UDP checksum: allowed over IPv4 */
-    q->send(f, 14 + iplen, 1);
+    if (q->mdns) {
+        const uint8_t multicast_mac[] = {1,0,0x5e,0,0,0xfb};
+        const uint8_t host_mac[] = {0x52,0x55,10,0,2,2};
+        const uint8_t multicast_ip[] = {224,0,0,251};
+        const uint8_t host_ip[] = {10,0,2,2};
+        memcpy(f, multicast_mac, 6); memcpy(f + 6, host_mac, 6);
+        memcpy(ip + 12, host_ip, 4); memcpy(ip + 16, multicast_ip, 4);
+        ip[8] = 255; wr16(ip + 10, 0); wr16(ip + 10, ip_checksum(ip, 20));
+        wr16(udp, 5353); wr16(udp + 2, 5353);
+        wr16(dns, 0); dns[2] = 0x84; dns[3] = 0; // authoritative mDNS, no recursion
+        // The retained question allows compressed answer names to refer to it.
+        wr16(dns + qlen - 2, q->qclass);
+        // mDNS uses a real UDP checksum even over IPv4.
+        uint8_t pseudo[12 + 8 + 4096];
+        memcpy(pseudo, ip + 12, 8); pseudo[8] = 0; pseudo[9] = 17;
+        wr16(pseudo + 10, udplen); memcpy(pseudo + 12, udp, udplen);
+        uint16_t sum = ip_checksum(pseudo, 12 + udplen);
+        wr16(udp + 6, sum ? sum : 0xffff);
+    }
+    if (!q->mdns || atomic_load(&local_discovery)) q->send(f, 14 + iplen, 1);
     free(f);
 }
 
 static void *lookup(void *arg) {
     Query *q = arg;
-    if (atomic_load(&stopping)) {
+    if (atomic_load(&stopping) || (q->mdns && !atomic_load(&local_discovery))) {
         free(q);
         lookup_finished();
         return NULL;
@@ -230,7 +253,7 @@ static void *lookup(void *arg) {
     DNSServiceErrorType err = DNSServiceQueryRecord(&ref, kDNSServiceFlagsReturnIntermediates, 0, q->name, q->qtype,
                                                     q->qclass, on_record, q);
     if (err != kDNSServiceErr_NoError) {
-        if (!atomic_load(&stopping)) {
+        if (!atomic_load(&stopping) && !q->mdns) {
             if (atomic_fetch_add(&failure_logs, 1) < 12)
                 fprintf(stderr, "hengevm: dns: start failed code=%d type=%u; using libslirp (query name omitted)\n", (int)err, q->qtype);
             q->send(q->frame, q->len, 0); /* libslirp, as before */
@@ -239,7 +262,7 @@ static void *lookup(void *arg) {
     } else {
         int fd = DNSServiceRefSockFD(ref);
         int64_t end = now_ms() + TIMEOUT_MS;
-        while (!q->done && !atomic_load(&stopping)) {
+        while (!q->done && !atomic_load(&stopping) && (!q->mdns || atomic_load(&local_discovery))) {
             int64_t left = end - now_ms();
             if (left <= 0) break;
             struct pollfd p = {fd, POLLIN, 0};
@@ -252,7 +275,10 @@ static void *lookup(void *arg) {
             }
         }
         DNSServiceRefDeallocate(ref);
-        if (!atomic_load(&stopping)) {
+        if (!atomic_load(&stopping) && q->mdns) {
+            // Missing/denied Bonjour records are silent, never poison Internet DNS fallback.
+            if (q->done && !q->failed && q->nans && atomic_load(&local_discovery)) reply(q, 0);
+        } else if (!atomic_load(&stopping)) {
             if (!q->done || q->failed) {
                 if (atomic_fetch_add(&failure_logs, 1) < 12)
                     fprintf(stderr, "hengevm: dns: lookup failed code=%d timeout=%d type=%u; returning SERVFAIL (query name omitted)\n", (int)q->resolver_error, !q->done && !q->failed, q->qtype);
@@ -277,7 +303,102 @@ int hv_dns_proxy_on(void) {
     return hv_knob[HV_K_DNSPROXY] != 0; /* HV_DNS_PROXY, on unless 0 (machine.c) */
 }
 
+static int local_question_allowed(const char *name, uint16_t type) {
+    if (type == 1 || type == 28) return 1;
+    if (type != 12 && type != 16 && type != 33 && type != 255) return 0;
+    static const char *services[] = {"_apple-mobdev2._tcp.local.", "_smb._tcp.local.", "_ssh._tcp.local.", "_rfb._tcp.local."};
+    size_t n = strlen(name);
+    for (unsigned i = 0; i < sizeof services / sizeof *services; i++) {
+        size_t k = strlen(services[i]);
+        if (n >= k && (n == k || name[n-k-1] == '.') && !strcasecmp(name + n-k, services[i])) return 1;
+    }
+    return 0;
+}
+
+static int enqueue_query(Query *q) {
+    pthread_mutex_lock(&lifecycle_mu);
+    if (atomic_load(&stopping) || atomic_load(&inflight) >= MAX_INFLIGHT) {
+        pthread_mutex_unlock(&lifecycle_mu);
+        free(q);
+        return 0;
+    }
+    atomic_fetch_add(&inflight, 1);
+    pthread_mutex_unlock(&lifecycle_mu);
+    pthread_t t;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&at, 256 * 1024);
+    int ok = pthread_create(&t, &at, lookup, q) == 0;
+    pthread_attr_destroy(&at);
+    if (!ok) {
+        free(q);
+        lookup_finished();
+        return 0;
+    }
+    return 1;
+}
+
+/* Expand a question's wire name, including bounded compression pointers. */
+static unsigned mdns_name(const uint8_t *dns, unsigned len, unsigned at, uint8_t out[256], unsigned *end) {
+    unsigned n = 0, jumps = 0; *end = 0;
+    while (at < len && jumps++ < 128) {
+        unsigned l = dns[at++];
+        if ((l & 0xc0) == 0xc0) {
+            if (at >= len) return 0;
+            unsigned target = ((l & 63) << 8) | dns[at++];
+            if (!*end) *end = at;
+            if (target >= at - 2) return 0; // only backwards pointers, no cycles
+            at = target; continue;
+        }
+        if (l > 63 || at + l > len || n + l + 1 > 255) return 0;
+        out[n++] = (uint8_t)l;
+        if (!l) { if (!*end) *end = at; return n; }
+        memcpy(out + n, dns + at, l); n += l; at += l;
+    }
+    return 0;
+}
+
+static int take_mdns(const uint8_t *p, uint32_t len, HvDnsSend send) {
+    if (!atomic_load(&local_discovery) || len < 54 || p[12] != 8 || p[13] != 0) return 0;
+    const uint8_t *ip = p + 14;
+    unsigned ihl = (ip[0] & 15) * 4, iplen = rd16(ip + 2);
+    if (ip[0] >> 4 != 4 || ihl < 20 || ip[9] != 17 || rd16(ip + 6) & 0x3fff ||
+        iplen > len - 14 || iplen < ihl + 20 || memcmp(ip + 16, "\xe0\0\0\xfb", 4)) return 0;
+    const uint8_t *udp = ip + ihl, *dns = udp + 8;
+    unsigned ulen = rd16(udp + 4), count = rd16(dns + 4);
+    if (rd16(udp + 2) != 5353 || ulen < 20 || ulen > iplen - ihl || ulen > MAX_QUERY + 8 ||
+        dns[2] & 0xf8 || !count || count > 16) return 0;
+    unsigned off = 12, dlen = ulen - 8;
+    int accepted = 0;
+    for (unsigned i = 0; i < count; i++) {
+        uint8_t wire[256]; unsigned end;
+        unsigned n = mdns_name(dns, dlen, off, wire, &end);
+        if (!n || end + 4 > dlen) break;
+        uint16_t type = rd16(dns + end), cls = rd16(dns + end + 2) & 0x7fff;
+        off = end + 4;
+        Query *q = calloc(1, sizeof *q);
+        if (!q) break;
+        int local = 0;
+        if (cls != 1 || !read_name(wire, n, 0, q->name, sizeof q->name, &local) || !local || !local_question_allowed(q->name, type)) {
+            free(q); continue;
+        }
+        // A standalone uncompressed question for correct answer-name pointers.
+        memcpy(q->frame, p, 14 + ihl + 8);
+        uint8_t *out = q->frame + 14 + ihl + 8;
+        memset(out, 0, 12); wr16(out + 4, 1);
+        memcpy(out + 12, wire, n); wr16(out + 12 + n, type); wr16(out + 14 + n, cls);
+        q->len = 14 + ihl + 8 + 12 + n + 4;
+        q->ip_off = 14; q->udp_off = 14 + ihl; q->dns_off = 14 + ihl + 8; q->qend = q->len;
+        wr16(q->frame + 16, q->len - 14); wr16(q->frame + q->udp_off + 4, q->len - q->udp_off);
+        q->qtype = type; q->qclass = cls; q->udp_max = 1472; q->mdns = 1; q->send = send;
+        accepted |= enqueue_query(q);
+    }
+    return accepted;
+}
+
 int hv_dns_proxy_take(const uint8_t *p, uint32_t len, HvDnsSend send) {
+    if (take_mdns(p, len, send)) return 1;
     if (!hv_dns_proxy_on() || len < 14 + 20 + 8 + 12 || p[12] != 0x08 || p[13] != 0x00) return 0;
     const uint8_t *ip = p + 14;
     uint32_t ihl = (uint32_t)(ip[0] & 15) * 4;
@@ -298,11 +419,12 @@ int hv_dns_proxy_take(const uint8_t *p, uint32_t len, HvDnsSend send) {
     if (!q) return 0;
     int local = 0;
     uint32_t off = read_name(dns, dlen, 12, q->name, sizeof q->name, &local);
-    if (!off || off + 4 > dlen || local) {
+    if (!off || off + 4 > dlen || (local && !atomic_load(&local_discovery))) {
         free(q);
         return 0;
     }
     q->qtype = rd16(dns + off), q->qclass = rd16(dns + off + 2);
+    if (local && !local_question_allowed(q->name, q->qtype)) { free(q); return 0; }
     uint32_t qend = off + 4;
     q->udp_max = 512;
     if (rd16(dns + 10) == 1) { /* EDNS: its OPT record says how big an answer may be */
@@ -318,31 +440,11 @@ int hv_dns_proxy_take(const uint8_t *p, uint32_t len, HvDnsSend send) {
         free(q);
         return 0;
     }
-    pthread_mutex_lock(&lifecycle_mu);
-    if (atomic_load(&stopping) || atomic_load(&inflight) >= MAX_INFLIGHT) {
-        pthread_mutex_unlock(&lifecycle_mu);
-        free(q);
-        return 0;
-    }
-    atomic_fetch_add(&inflight, 1);
-    pthread_mutex_unlock(&lifecycle_mu);
     memcpy(q->frame, p, 14 + iplen);
     q->len = 14 + iplen;
     q->ip_off = 14, q->udp_off = 14 + ihl, q->dns_off = 14 + ihl + 8, q->qend = q->dns_off + qend;
     q->send = send;
-    pthread_t t;
-    pthread_attr_t at;
-    pthread_attr_init(&at);
-    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-    pthread_attr_setstacksize(&at, 256 * 1024);
-    int ok = pthread_create(&t, &at, lookup, q) == 0;
-    pthread_attr_destroy(&at);
-    if (!ok) {
-        free(q);
-        lookup_finished();
-        return 0;
-    }
-    return 1;
+    return enqueue_query(q);
 }
 
 void hv_dns_proxy_stats(uint64_t *n_answered, uint64_t *n_handed_back, uint64_t *n_timed_out) {
