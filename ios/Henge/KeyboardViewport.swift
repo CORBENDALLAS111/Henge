@@ -20,3 +20,19 @@ enum KeyboardViewport {
         return CGRect(x: base.minX, y: min(high, max(low, automatic + offset)), width: base.width, height: base.height)
     }
 }
+
+/// One classified click. Its viewport change must wait for guest delivery.
+struct KeyboardTapRequest {
+    let point: CGPoint
+    let began: TimeInterval
+    enum Decision: Equatable { case wait, discard, apply(CGPoint, open: Bool) }
+    func resolve(now: TimeInterval, inputActive: Bool, penIdle: Bool, mode: String,
+                 keyboardVisible: Bool, focusStatus: Int32, focusAge: Double) -> Decision {
+        let elapsed = now - began
+        guard inputActive, elapsed >= 0, elapsed <= 2, point.x.isFinite, point.y.isFinite else { return .discard }
+        guard elapsed >= 0.18, penIdle else { return .wait }
+        let open = mode == "tap" || (mode == "text" && focusStatus == 1 && focusAge >= 0 && focusAge < elapsed - 0.15)
+        if open || keyboardVisible || (mode != "tap" && mode != "text") { return .apply(point, open: open) }
+        return .wait
+    }
+}

@@ -45,6 +45,7 @@ struct SessionView: View {
     @State private var keyboardPan: CGFloat = 0
     @State private var keyboardPanStart: CGFloat?
     @State private var keyboardTapAt: TimeInterval?
+    @State private var keyboardTapPoint: CGPoint?
     @State private var zoomed = false
     @State private var showDetails = false
     @State private var showFiles = false
@@ -246,11 +247,10 @@ struct SessionView: View {
         .onReceive(NotificationCenter.default.publisher(for: SessionKeyboard.directTap)) { note in
             guard touchInputActive, !display.isExternal,
                   let x = note.userInfo?["x"] as? Double, let y = note.userInfo?["y"] as? Double else { return }
-            keyboardFocus = CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
-            keyboardPan = 0
-            if keyboardMode != "manual" { keyboardTapAt = ProcessInfo.processInfo.systemUptime }
+            keyboardTapPoint = CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            keyboardTapAt = ProcessInfo.processInfo.systemUptime
         }
-        .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil } }
+        .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil; keyboardTapPoint = nil } }
         .onChange(of: keyboardMode == "text" && touchInputActive, initial: true) { _, enabled in henge_share_set_focus_enabled(enabled ? 1 : 0) }
         .task(id: keyboardMode) { await followKeyboardFocus() }
         .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
@@ -394,15 +394,19 @@ struct SessionView: View {
 
     @MainActor private func followKeyboardFocus() async {
         while !Task.isCancelled {
-            if let tapped = keyboardTapAt {
-                let elapsed = ProcessInfo.processInfo.systemUptime - tapped
-                if elapsed > 2 || !touchInputActive { keyboardTapAt = nil }
-                else if elapsed >= 0.18 && henge_vm_pen_idle() != 0 {
-                    var rect = [Double](repeating: 0, count: 4), age = 0.0
-                    let focused = rect.withUnsafeMutableBufferPointer { henge_share_focus($0.baseAddress, &age) }
-                    if keyboardMode == "tap" || (keyboardMode == "text" && focused == 1 && age < elapsed - 0.15) {
-                        typing = true; keyboardTapAt = nil
-                    }
+            if let tapped = keyboardTapAt, let point = keyboardTapPoint {
+                var rect = [Double](repeating: 0, count: 4), age = 0.0
+                let focused = rect.withUnsafeMutableBufferPointer { henge_share_focus($0.baseAddress, &age) }
+                let request = KeyboardTapRequest(point: point, began: tapped)
+                switch request.resolve(now: ProcessInfo.processInfo.systemUptime, inputActive: touchInputActive,
+                                       penIdle: henge_vm_pen_idle() != 0, mode: keyboardMode,
+                                       keyboardVisible: typing, focusStatus: focused, focusAge: age) {
+                case .wait: break
+                case .discard: keyboardTapAt = nil; keyboardTapPoint = nil
+                case .apply(let target, let open):
+                    keyboardFocus = target; keyboardPan = 0
+                    if open { typing = true }
+                    keyboardTapAt = nil; keyboardTapPoint = nil
                 }
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
