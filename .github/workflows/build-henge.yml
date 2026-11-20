@@ -69,6 +69,10 @@ jobs:
         working-directory: Henge
         run: make test-apple-account-support test-mdns-proxy test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
+      - name: Validate VM address reservation preparation
+        working-directory: Henge
+        run: python3 tests/test_jit_high_room.py
+
       - name: Build and verify the macOS sample disk image
         working-directory: Henge
         run: |

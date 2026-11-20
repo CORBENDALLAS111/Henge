@@ -26,8 +26,14 @@ The later source branch head 4d1c19f changes packaging names only. Imported here
 exact Darwin kernel version/delta/process-layout profiles for builds 24G90,
 25G83 and 26B123. The existing synthetic identity generator, boot configuration,
 scoped process allowlist and early device-tree setup were already present.
-Camera, microphone, lab tools, guest disks, user accounts and private test
-identities from the source branch are not imported.
+Also ported the source fork's prerequisite memory fix from
+[3ff3bea](https://github.com/liukaixiang817/Henge/commit/3ff3bea1a76a1e70c1e6e989feeafdd700de348c):
+release unclaimed Mac-app address reservations before VM RAM sizing, boot/resume
+and installation. Claimed Mac-app rooms and live JIT mappings remain owned by
+their existing users. Its real-Mach regression fixture covers allocation before
+and after release, claimed ownership, release failure/retry and Swift RAM sizing.
+Camera, microphone, guest disks, user accounts and private test identities from
+the source branch are not imported.
 
 The largest process layout is now accounted for in the native buffer, while
 reads cover only the current profile's required span. Unknown instruction
