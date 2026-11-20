@@ -59,6 +59,10 @@ jobs:
           bash -n tools/check-apple-services.sh
           cmp tools/check-apple-services.sh ios/Henge/Resources/check-apple-services.sh
 
+      - name: Compile app sources and display routing
+        working-directory: Henge
+        run: bash ios/scripts/check_display.sh
+
       # These fixtures need only the runner's Xcode, not the restore/dependency
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
@@ -123,7 +127,6 @@ jobs:
       - name: Validate Swift, native renderer and display compatibility
         working-directory: Henge
         run: |
-          bash ios/scripts/check_display.sh
           xcrun --sdk macosx swiftc ios/Henge/PhysicalMouseButtons.swift tests/test_physical_mouse_buttons.swift -o build/test_physical_mouse_buttons
           build/test_physical_mouse_buttons
           xcrun --sdk macosx swiftc ios/Henge/AbsolutePenSample.swift tests/test_absolute_pen_sample.swift -o build/test_absolute_pen_sample

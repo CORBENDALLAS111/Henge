@@ -5,7 +5,7 @@ import Observation
 /// The iPad's connection, not a claim that the guest has a Wi-Fi radio.
 @MainActor @Observable final class LocalNetworkStatus {
     private(set) var connection = "Checking…"
-    private var monitor: NWPathMonitor?
+    @ObservationIgnored private var monitor: NWPathMonitor?
     func start() {
         guard monitor == nil else { return }
         let monitor = NWPathMonitor()
