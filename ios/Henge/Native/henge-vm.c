@@ -428,6 +428,13 @@ void henge_share_set_focus_enabled(int enabled) { hv_share_set_focus_enabled(ena
 int henge_share_focus(double bounds[4], double *age) { return hv_share_focus(bounds,age); }
 long henge_share_agent_seen(void) { return hv_share_agent_seen(); }
 
+int henge_vm_display_pixels(uint32_t *width, uint32_t *height) {
+    if (!lock_running()) return -1;
+    int result = hv_pvg_lite_scanout_size(hv_vm_board()->pvg, width, height);
+    pthread_rwlock_unlock(&api_lock);
+    return result;
+}
+
 void henge_vm_set_display(uint32_t width, uint32_t height) { hv_pvg_lite_set_mode(width, height); }
 void henge_vm_set_display_mm(uint32_t width_mm, uint32_t height_mm) { hv_pvg_lite_set_size_mm(width_mm, height_mm); }
 

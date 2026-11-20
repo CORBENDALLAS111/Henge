@@ -18,6 +18,7 @@ struct SessionView: View {
     @State private var cpusOn: Int32 = 0
     @State private var userCode = false
     @State private var softwareIdentityStatus: Int32 = 0
+    @State private var actualDisplayPixels: String?
     @State private var pencilInRange = false
     @State private var audioOutput = AudioOutputPicker.routeDescription
     @State private var keyboardConnected = GCKeyboard.coalesced != nil
@@ -649,6 +650,10 @@ struct SessionView: View {
                     LabeledContent("Up", value: "\(Int(Date().timeIntervalSince(started))) s")
                 }
                 Section("Display") {
+                    LabeledContent("Selected resolution", value: "\(mac.screen.width) × \(mac.screen.height)")
+                    LabeledContent("Mac display pixels", value: actualDisplayPixels ?? "Waiting for the desktop")
+                    Text("Sizes are physical pixels. Retina mode can show a smaller ‘Looks like’ size in macOS. Resolution changes require shutting down macOS and starting it again.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Toggle("Color matching", isOn: $matchScreenColors)
                     LabeledContent("Brightness", value: "\(Int(screenBrightness * 100))%")
                     Slider(value: $screenBrightness, in: 0.4...1)
@@ -771,6 +776,7 @@ struct SessionView: View {
         state = 0
         userCode = false
         softwareIdentityStatus = 0
+        actualDisplayPixels = nil
         cpusOn = 0
         blocksPerSecond = 0
         framesOut = 0
@@ -847,9 +853,7 @@ struct SessionView: View {
         }
         bootRAM = ram
         started = Date()
-        var used = mac
-        used.lastUsed = started
-        Machines.shared.update(used)
+        Machines.shared.markUsed(mac.id, at: started)
         var lastBlocks = henge_vm_blocks()
         var lastTime = Date()
         var lastGPUFrames = henge_vm_gpu_frames()
@@ -863,6 +867,11 @@ struct SessionView: View {
             cpusOn = henge_vm_cpus_on()
             userCode = userCode || henge_vm_guest_el0() != 0
             softwareIdentityStatus = henge_vm_software_identity_status()
+            var pixelWidth: UInt32 = 0, pixelHeight: UInt32 = 0
+            if henge_vm_display_pixels(&pixelWidth, &pixelHeight) == 0 {
+                let pixels = "\(pixelWidth) × \(pixelHeight)"
+                if pixels != actualDisplayPixels { actualDisplayPixels = pixels }
+            }
             let now = Date(), blocks = henge_vm_blocks()
             blocksPerSecond = Double(blocks &- lastBlocks) / max(now.timeIntervalSince(lastTime), 0.001)
             lastBlocks = blocks

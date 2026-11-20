@@ -28,8 +28,13 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     /// With reportHostIdentity: also report the device's model identifier (hw.model).
     /// Experimental — it may bring the device's icon, and may confuse macOS.
     var reportHostModelID: Bool?
-    var isRetina: Bool { Device.isPad && (retina ?? false) }
-    var screen: (width: Int, height: Int) { isRetina ? Device.retinaScreen : (screenWidth ?? 1920, screenHeight ?? 1080) }
+    var isRetina: Bool { GuestResolution.usesRetina(custom: customResolution, retina: retina, isPad: Device.isPad) }
+    var screen: (width: Int, height: Int) {
+        let native = Device.retinaScreen
+        let size = GuestResolution.selected(width: screenWidth, height: screenHeight, custom: customResolution,
+            retina: retina, isPad: Device.isPad, nativeWidth: native.width, nativeHeight: native.height)
+        return (size.width, size.height)
+    }
     var aspect: CGFloat { CGFloat(screen.width) / CGFloat(screen.height) }
 
     var directory: URL { Machines.directory(for: id) }
@@ -77,6 +82,10 @@ private struct MachineFile: Codable {
     var ramMB: Int?
     var softwareIdentity: SoftwareIdentity?
     var accountCompatibilityDisabled: Bool?
+    var screenWidth: Int?
+    var screenHeight: Int?
+    var customResolution: Bool?
+    var retina: Bool?
 }
 
 @MainActor
@@ -149,7 +158,11 @@ final class Machines: ObservableObject {
                 catch { lastError = error.localizedDescription; continue }
                 let os = (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 mac.osName = os.isEmpty ? nil : os
-                (mac.screenWidth, mac.screenHeight) = Device.fittingScreen
+                mac.screenWidth = info.screenWidth
+                mac.screenHeight = info.screenHeight
+                mac.customResolution = info.customResolution
+                mac.retina = info.retina
+                if mac.screenWidth == nil && mac.screenHeight == nil { (mac.screenWidth, mac.screenHeight) = Device.fittingScreen }
                 all.append(mac)
                 save()
                 try? fm.removeItem(at: item.appendingPathComponent("restore"))
@@ -205,6 +218,8 @@ final class Machines: ObservableObject {
                                  ramMB: info.ramMB ?? 2048, diskBytes: 0)
             mac.softwareIdentity = info.softwareIdentity
             mac.accountCompatibilityDisabled = info.accountCompatibilityDisabled
+            mac.screenWidth = info.screenWidth; mac.screenHeight = info.screenHeight
+            mac.customResolution = info.customResolution; mac.retina = info.retina
             importing = mac.name
             unpacked = 0
             let dest = mac.directory
@@ -287,6 +302,10 @@ final class Machines: ObservableObject {
             var info: [String: Any] = ["name": mac.name, "ecid": mac.ecid, "seed": mac.seed, "ramMB": mac.ramMB]
             if let identity = mac.softwareIdentity { info["softwareIdentity"] = identity.manifest }
             if let disabled = mac.accountCompatibilityDisabled { info["accountCompatibilityDisabled"] = disabled }
+            if let width = mac.screenWidth { info["screenWidth"] = width }
+            if let height = mac.screenHeight { info["screenHeight"] = height }
+            if let custom = mac.customResolution { info["customResolution"] = custom }
+            if let retina = mac.retina { info["retina"] = retina }
             try JSONSerialization.data(withJSONObject: info).write(to: partial.appendingPathComponent("machine.json"))
             let source = mac.disk.path, target = partial.appendingPathComponent(Self.packedDisk).path
             let ok = await Task.detached { () -> Bool in
@@ -316,6 +335,13 @@ final class Machines: ObservableObject {
         guard let i = all.firstIndex(where: { $0.id == mac.id }) else { return }
         do { all[i] = try mac.resolvingAccountProfile() }
         catch { lastError = error.localizedDescription; return }
+        save()
+    }
+
+    /// A session holds a boot-time copy. Marking it used must not restore stale settings.
+    func markUsed(_ id: UUID, at date: Date) {
+        guard let i = all.firstIndex(where: { $0.id == id }) else { return }
+        all[i].lastUsed = date
         save()
     }
 

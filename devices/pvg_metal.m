@@ -3045,6 +3045,18 @@ int hv_pvg_metal_snapshot(HvPvgMetal *m, uint8_t *bgra, uint32_t w, uint32_t h) 
     return 0;
 }
 
+int hv_pvg_metal_scanout_size(HvPvgMetal *m, uint32_t *w, uint32_t *h) {
+    if (!m || !w || !h) return -1;
+    HvReplay *r = (__bridge HvReplay *)m;
+    os_unfair_lock_lock(&r->screen_lock);
+    uint32_t width = r->screen_w, height = r->screen_h;
+    BOOL ready = r->screen_tex != nil && width && height;
+    os_unfair_lock_unlock(&r->screen_lock);
+    if (!ready) return -1;
+    *w = width; *h = height;
+    return 0;
+}
+
 int hv_pvg_metal_frame(HvPvgMetal *m, const uint8_t **pixels, uint32_t *w, uint32_t *h) {
     if (!m) return -1;
     HvReplay *r = (__bridge HvReplay *)m;

@@ -67,7 +67,7 @@ jobs:
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
         working-directory: Henge
-        run: make build/henge-agent test-keyboard-input test-apple-account-support test-existing-account-profile test-mdns-proxy test-direct-contact test-one-finger-scroll test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
+        run: make build/henge-agent test-keyboard-input test-apple-account-support test-existing-account-profile test-mdns-proxy test-direct-contact test-one-finger-scroll test-guest-resolution test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
       - name: Check stationary clicks through the macOS HID driver
         working-directory: Henge

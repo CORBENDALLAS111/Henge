@@ -385,3 +385,9 @@ $(B)/test_one_finger_scroll: ios/Henge/OneFingerScroll.swift tests/test_one_fing
 test-one-finger-scroll: $(B)/test_one_finger_scroll
 	$(B)/test_one_finger_scroll
 .PHONY: test-one-finger-scroll
+
+$(B)/test_guest_resolution: ios/Henge/GuestResolution.swift tests/test_guest_resolution.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-guest-resolution: $(B)/test_guest_resolution
+	$(B)/test_guest_resolution
+.PHONY: test-guest-resolution

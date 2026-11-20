@@ -83,6 +83,8 @@ int henge_share_focus(double bounds[4], double *age);
 
 /* The size macOS is told its screen is. Before henge_vm_boot. */
 void henge_vm_set_display(uint32_t width, uint32_t height);
+/* Physical pixel size of the actual Mac scanout, or -1 before the guest draws. */
+int henge_vm_display_pixels(uint32_t *width, uint32_t *height);
 /* What the guest's About This Mac says, for the next boot (NULL leaves the vmapple
    identity): the chip's name, the product name, and — experimental — the model
    identifier (hw.model). The chip goes through the config region; the other two

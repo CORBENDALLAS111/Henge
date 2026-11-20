@@ -169,6 +169,8 @@ void hv_pvg_lite_set_size_mm(uint32_t width_mm, uint32_t height_mm) {
 }
 
 void hv_pvg_lite_set_mode(uint32_t width, uint32_t height) {
+    if (width < 640 || width > 7680 || height < 480 || height > 4320 ||
+        (uint64_t)width * height > 8294400) return;
     display_w = width;
     display_h = height;
 }
@@ -180,7 +182,9 @@ static void display_set_page(HvPvgLite *p, uint64_t pa) {
 #define PUT32(off, v) (*(uint32_t *)(d + (off)) = (uint32_t)(v))
 #define PUTF(off, v) (*(float *)(d + (off)) = (v))
     PUT32(0x00, 1);
-    uint32_t width_mm = 400, height_mm = 400 * display_h / display_w; /* the same pixel density at any shape */
+    /* Keep non-Retina density at the original 1080p value. A constant
+       400-mm width made higher pixel modes look Retina-dense to macOS. */
+    uint32_t width_mm = 400 * display_w / 1920, height_mm = 400 * display_h / 1920;
     if (display_mm_w && display_mm_h) width_mm = display_mm_w, height_mm = display_mm_h;
     PUT32(0x14, height_mm << 16 | width_mm);
     PUT32(0x18, 0x01000100);
@@ -419,6 +423,10 @@ uint64_t hv_pvg_lite_gpu_frames(HvPvgLite *p) {
 
 int hv_pvg_lite_snapshot(HvPvgLite *p, uint8_t *bgra, uint32_t width, uint32_t height) {
     return p && p->metal ? hv_pvg_metal_snapshot(p->metal, bgra, width, height) : -1;
+}
+
+int hv_pvg_lite_scanout_size(HvPvgLite *p, uint32_t *width, uint32_t *height) {
+    return p && p->metal ? hv_pvg_metal_scanout_size(p->metal, width, height) : -1;
 }
 
 int hv_pvg_lite_frame(HvPvgLite *p, const uint8_t **pixels, uint32_t *width, uint32_t *height) {
