@@ -40,15 +40,30 @@ typedef struct {
     uint32_t len;
     uint32_t ip_off, udp_off, dns_off, qend; /* offsets into frame; qend: the end of the question */
     uint16_t qtype, qclass, udp_max;
-    int edns, mdns;
+    int edns, mdns, local;
+    unsigned local_epoch;
     char name[1025];
     Answer ans[MAX_ANSWERS];
     int nans, nodata, failed, done;
     DNSServiceErrorType resolver_error;
 } Query;
 
-static atomic_int local_discovery;
-void hv_dns_proxy_set_local(int enabled) { atomic_store(&local_discovery, enabled != 0); }
+static atomic_int local_discovery, local_status;
+static atomic_uint local_epoch;
+void hv_dns_proxy_set_local(int enabled) {
+    enabled = enabled != 0;
+    if (atomic_exchange(&local_discovery, enabled) != enabled) {
+        atomic_fetch_add(&local_epoch, 1);
+        atomic_store(&local_status, enabled ? 1 : 0);
+    }
+}
+int hv_dns_proxy_local_status(void) { return atomic_load(&local_status); }
+static int local_current(const Query *q) {
+    return !q->local || (atomic_load(&local_discovery) && q->local_epoch == atomic_load(&local_epoch));
+}
+static void local_result(const Query *q, int status) {
+    if (q->local && local_current(q)) atomic_store(&local_status, status);
+}
 
 static atomic_int inflight, unanswered_in_a_row;
 static atomic_ullong answered, handed_back, timed_out;
@@ -68,6 +83,7 @@ static void lookup_finished(void) {
 void hv_dns_proxy_start(void) {
     pthread_mutex_lock(&lifecycle_mu);
     atomic_store(&stopping, 0);
+    atomic_store(&local_status, atomic_load(&local_discovery) ? 1 : 0);
     atomic_store(&answered, 0);
     atomic_store(&handed_back, 0);
     atomic_store(&timed_out, 0);
@@ -131,6 +147,7 @@ static void DNSSD_API on_record(DNSServiceRef ref, DNSServiceFlags flags, uint32
     if (err == kDNSServiceErr_NoSuchRecord || err == kDNSServiceErr_NoSuchName) {
         q->nodata = 1; /* no such name, or nothing of this type: either way an empty answer */
     } else if (err) {
+        local_result(q, err == kDNSServiceErr_PolicyDenied ? 3 : 4);
         q->resolver_error = err;
         q->failed = 1;
         q->done = 1;
@@ -238,13 +255,13 @@ static void reply(Query *q, int rcode) {
         uint16_t sum = ip_checksum(pseudo, 12 + udplen);
         wr16(udp + 6, sum ? sum : 0xffff);
     }
-    if (!q->mdns || atomic_load(&local_discovery)) q->send(f, 14 + iplen, 1);
+    if (local_current(q)) q->send(f, 14 + iplen, 1);
     free(f);
 }
 
 static void *lookup(void *arg) {
     Query *q = arg;
-    if (atomic_load(&stopping) || (q->mdns && !atomic_load(&local_discovery))) {
+    if (atomic_load(&stopping) || !local_current(q)) {
         free(q);
         lookup_finished();
         return NULL;
@@ -253,7 +270,9 @@ static void *lookup(void *arg) {
     DNSServiceErrorType err = DNSServiceQueryRecord(&ref, kDNSServiceFlagsReturnIntermediates, 0, q->name, q->qtype,
                                                     q->qclass, on_record, q);
     if (err != kDNSServiceErr_NoError) {
-        if (!atomic_load(&stopping) && !q->mdns) {
+        local_result(q, err == kDNSServiceErr_PolicyDenied ? 3 : 4);
+        if (!atomic_load(&stopping) && q->local && !q->mdns && local_current(q)) reply(q, 2);
+        if (!atomic_load(&stopping) && !q->local) {
             if (atomic_fetch_add(&failure_logs, 1) < 12)
                 fprintf(stderr, "hengevm: dns: start failed code=%d type=%u; using libslirp (query name omitted)\n", (int)err, q->qtype);
             q->send(q->frame, q->len, 0); /* libslirp, as before */
@@ -262,22 +281,26 @@ static void *lookup(void *arg) {
     } else {
         int fd = DNSServiceRefSockFD(ref);
         int64_t end = now_ms() + TIMEOUT_MS;
-        while (!q->done && !atomic_load(&stopping) && (!q->mdns || atomic_load(&local_discovery))) {
+        while (!q->done && !atomic_load(&stopping) && local_current(q)) {
             int64_t left = end - now_ms();
             if (left <= 0) break;
             struct pollfd p = {fd, POLLIN, 0};
             int r = poll(&p, 1, (int)(left < 100 ? left : 100));
             DNSServiceErrorType process_error = r > 0 ? DNSServiceProcessResult(ref) : kDNSServiceErr_NoError;
             if (process_error != kDNSServiceErr_NoError) {
+                local_result(q, process_error == kDNSServiceErr_PolicyDenied ? 3 : 4);
                 q->resolver_error = process_error;
                 q->failed = 1;
                 break;
             }
         }
         DNSServiceRefDeallocate(ref);
-        if (!atomic_load(&stopping) && q->mdns) {
+        if (!atomic_load(&stopping) && q->local) {
             // Missing/denied Bonjour records are silent, never poison Internet DNS fallback.
-            if (q->done && !q->failed && q->nans && atomic_load(&local_discovery)) reply(q, 0);
+            if (local_current(q)) {
+                if (q->done && !q->failed && q->nans) local_result(q, 2);
+                if (!q->mdns || (q->done && !q->failed && q->nans)) reply(q, q->done && !q->failed ? 0 : 2);
+            }
         } else if (!atomic_load(&stopping)) {
             if (!q->done || q->failed) {
                 if (atomic_fetch_add(&failure_logs, 1) < 12)
@@ -322,6 +345,7 @@ static int enqueue_query(Query *q) {
         free(q);
         return 0;
     }
+    if (q->local) q->local_epoch = atomic_load(&local_epoch);
     atomic_fetch_add(&inflight, 1);
     pthread_mutex_unlock(&lifecycle_mu);
     pthread_t t;
@@ -391,7 +415,7 @@ static int take_mdns(const uint8_t *p, uint32_t len, HvDnsSend send) {
         q->len = 14 + ihl + 8 + 12 + n + 4;
         q->ip_off = 14; q->udp_off = 14 + ihl; q->dns_off = 14 + ihl + 8; q->qend = q->len;
         wr16(q->frame + 16, q->len - 14); wr16(q->frame + q->udp_off + 4, q->len - q->udp_off);
-        q->qtype = type; q->qclass = cls; q->udp_max = 1472; q->mdns = 1; q->send = send;
+        q->qtype = type; q->qclass = cls; q->udp_max = 1472; q->mdns = q->local = 1; q->send = send;
         accepted |= enqueue_query(q);
     }
     return accepted;
@@ -424,6 +448,7 @@ int hv_dns_proxy_take(const uint8_t *p, uint32_t len, HvDnsSend send) {
         return 0;
     }
     q->qtype = rd16(dns + off), q->qclass = rd16(dns + off + 2);
+    q->local = local;
     if (local && !local_question_allowed(q->name, q->qtype)) { free(q); return 0; }
     uint32_t qend = off + 4;
     q->udp_max = 512;

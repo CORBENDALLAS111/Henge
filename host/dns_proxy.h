@@ -11,6 +11,8 @@ typedef void (*HvDnsSend)(const uint8_t *frame, uint32_t len, int to_guest);
 
 /* Opt-in, live; uses declared Bonjour services through the system resolver. */
 void hv_dns_proxy_set_local(int enabled);
+/* 0 off, 1 waiting for guest query, 2 answered, 3 permission denied, 4 resolver error. */
+int hv_dns_proxy_local_status(void);
 int hv_dns_proxy_on(void);
 /* Start a fresh network session, or stop and wait for every lookup callback.
    The caller keeps its send queues alive until stop returns. */

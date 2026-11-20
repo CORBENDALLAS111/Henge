@@ -6,8 +6,18 @@ struct ConnectivityView: View {
     var typeDiagnostics: (() -> Void)? = nil
     static let discoveryKey = "henge.network.localDiscovery"
     @AppStorage(Self.discoveryKey) private var discovery = false
+    @State private var discoveryStatus: Int32 = 0
     @State private var network = LocalNetworkStatus()
     @Environment(\.openURL) private var openURL
+
+    private var discoveryMessage: String {
+        switch discoveryStatus {
+        case 2: return "Answered a Mac lookup"
+        case 3: return "Local Network access denied"
+        case 4: return "System resolver unavailable"
+        default: return "Waiting for a Mac lookup"
+        }
+    }
 
     var body: some View {
         Form {
@@ -15,6 +25,7 @@ struct ConnectivityView: View {
                 LabeledContent(Device.isPad ? "iPad connection" : "iPhone connection", value: network.connection)
                 LabeledContent("Mac connection", value: "Shared network (NAT)")
                 Toggle("Discover local devices", isOn: $discovery)
+                if discovery { LabeledContent("Discovery", value: discoveryMessage) }
                 Text("Find iPhones, shared folders, SSH and screen sharing on the same network. Allow Local Network access when iPadOS asks. Devices must also allow connections from this iPad.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button("Open Device Settings") {
@@ -51,7 +62,13 @@ struct ConnectivityView: View {
         .background(Desk.page)
         .navigationTitle("Network & Devices")
         .navigationBarTitleDisplayMode(.inline)
-        .task { network.start() }
+        .task {
+            network.start()
+            while !Task.isCancelled {
+                discoveryStatus = henge_vm_local_discovery_status()
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
         .onDisappear { network.stop() }
         .onChange(of: discovery, initial: true) { _, enabled in henge_vm_set_local_discovery(enabled ? 1 : 0) }
     }

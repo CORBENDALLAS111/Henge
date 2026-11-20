@@ -4,7 +4,7 @@
 #include <unistd.h>
 int hv_knob[HV_K_COUNT];
 typedef struct { int pipe[2]; DNSServiceQueryRecordReply cb; void *ctx; uint16_t type; char name[1025]; } Fake;
-static atomic_int replies, live;
+static atomic_int replies, live, deny, callbacks;
 static uint8_t capture[4][1600];
 static unsigned lengths[4];
 DNSServiceErrorType DNSServiceQueryRecord(DNSServiceRef *out, DNSServiceFlags flags, uint32_t iface,
@@ -21,6 +21,11 @@ void DNSServiceRefDeallocate(DNSServiceRef ref) {
 }
 DNSServiceErrorType DNSServiceProcessResult(DNSServiceRef ref) {
     Fake *f = (Fake *)ref; char c; assert(read(f->pipe[0], &c, 1) == 1);
+    atomic_fetch_add(&callbacks, 1);
+    if (atomic_load(&deny)) {
+        f->cb(ref, 0, 0, kDNSServiceErr_PolicyDenied, f->name, f->type, 1, 0, NULL, 0, f->ctx);
+        return 0;
+    }
     const uint8_t ptr[] = {5,'p','h','o','n','e',6,'_','a','p','p','l','e',0};
     const uint8_t addr[] = {192,168,1,23};
     f->cb(ref, kDNSServiceFlagsAdd, 0, 0, f->name, f->type, 1,
@@ -79,6 +84,21 @@ int main(void) {
         memcpy(pseudo, a+12, 8); pseudo[8] = 0; pseudo[9] = 17; wr16(pseudo+10, ulen); memcpy(pseudo+12, u, ulen);
         assert(ip_checksum(pseudo, 12+ulen) == 0);
     }
+    assert(hv_dns_proxy_local_status() == 2);
+    Query old = {.local = 1, .local_epoch = atomic_load(&local_epoch)};
+    hv_dns_proxy_set_local(0); hv_dns_proxy_set_local(1);
+    assert(!local_current(&old)); local_result(&old, 3);
+    assert(hv_dns_proxy_local_status() == 1); // old callbacks cannot overwrite a new session
+    hv_knob[HV_K_DNSPROXY] = 1; atomic_store(&deny, 1);
+    for (unsigned i = 0; i < 9; i++) {
+        hv_dns_proxy_start(); unsigned target = atomic_load(&callbacks) + 2;
+        assert(hv_dns_proxy_take(packet, 42+n, collect));
+        for (unsigned tries = 0; tries < 2000 && atomic_load(&callbacks) < target; tries++) usleep(1000);
+        hv_dns_proxy_stop();
+        assert(atomic_load(&callbacks) == target && hv_dns_proxy_local_status() == 3);
+        assert(hv_dns_proxy_on() && atomic_load(&unanswered_in_a_row) == 0);
+    }
+    assert(atomic_load(&replies) == 2); // denied mDNS never creates a fake answer
     hv_dns_proxy_start(); hv_dns_proxy_set_local(0);
     assert(!hv_dns_proxy_take(packet, 42+n, collect)); hv_dns_proxy_stop();
     puts("PASS: opt-in Bonjour, declared service policy, compressed multiple questions, multicast wire checksums, teardown and DNS isolation");
