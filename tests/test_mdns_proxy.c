@@ -91,7 +91,7 @@ int main(void) {
     assert(hv_dns_proxy_local_status() == 1); // old callbacks cannot overwrite a new session
     hv_knob[HV_K_DNSPROXY] = 1; atomic_store(&deny, 1);
     for (unsigned i = 0; i < 9; i++) {
-        hv_dns_proxy_start(); unsigned target = atomic_load(&callbacks) + 2;
+        hv_dns_proxy_start(); int target = atomic_load(&callbacks) + 2;
         assert(hv_dns_proxy_take(packet, 42+n, collect));
         for (unsigned tries = 0; tries < 2000 && atomic_load(&callbacks) < target; tries++) usleep(1000);
         hv_dns_proxy_stop();
