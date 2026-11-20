@@ -32,7 +32,7 @@ struct SessionView: View {
     @AppStorage("henge.cpus") private var cpus = 4
     @AppStorage("henge.matchScreenColors") private var matchScreenColors = true
     @AppStorage("henge.display.brightness") private var screenBrightness = 1.0
-    @AppStorage("henge.touch.mode") private var touchMode = "trackpad"
+    @AppStorage("henge.touch.mode") private var touchMode = "direct"
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -423,11 +423,13 @@ struct SessionView: View {
                 Spacer()
                 tool("keyboard", "Keyboard") { typing = true }
                 Spacer()
+                touchModeTool
+                Spacer()
                 pasteTool
                 Spacer()
                 tool("plus.magnifyingglass", "Zoom in") { zoomed = true }
                 Spacer()
-                if layout.pad.width >= 390 {
+                if layout.pad.width >= 440 {
                     tool("folder", "Shared Files") { showFiles = true }
                     Spacer()
                 }
@@ -482,6 +484,29 @@ struct SessionView: View {
             .font(.system(size: 15))
     }
 
+    /// The selected method stays visible in the session, including full screen.
+    private var touchModeTool: some View {
+        Menu {
+            Picker("Control method", selection: $touchMode) {
+                Text("Direct Touch").tag("direct")
+                Text("Trackpad").tag("trackpad")
+            }
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: touchMode == "direct" ? "hand.point.up.left" : "rectangle.and.hand.point.up.left")
+                    .font(.system(size: 16, weight: .medium))
+                Text(touchMode == "direct" ? "Touch" : "Trackpad").font(.caption2)
+            }
+            .foregroundStyle(Desk.accentLight)
+            .frame(width: 54, height: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Control method")
+        .accessibilityValue(touchMode == "direct" ? "Direct Touch" : "Trackpad")
+        .disabled(display.isExternal)
+        .accessibilityHint(display.isExternal ? "The external display uses trackpad control" : "Choose Direct Touch or Trackpad")
+    }
+
     /// The system's paste button: iOS asks no permission for it, as it would if the app read the clipboard itself.
     private var pasteTool: some View {
         PasteButton(payloadType: String.self) { texts in
@@ -521,8 +546,9 @@ struct SessionView: View {
         let pill = HStack(spacing: 4) {
             tool("eye.slash", "Hide controls", tint: .white) { hideControls() }
             tool("keyboard", "Keyboard", tint: .white) { typing.toggle() }
-            pasteTool
-            if layout.touch.width >= 360 { tool("folder", "Shared Files", tint: .white) { showFiles = true } }
+            touchModeTool
+            if layout.touch.width >= 360 { pasteTool }
+            if layout.touch.width >= 440 { tool("folder", "Shared Files", tint: .white) { showFiles = true } }
             tool(zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass", zoomed ? "Zoom out" : "Zoom in", tint: zoomed ? Desk.accentLight : .white) { zoomed.toggle() }
             tool("info.circle", "Details", tint: .white) { showDetails = true }
             Rectangle().fill(Color.white.opacity(0.3)).frame(width: 1, height: 22).padding(.horizontal, 4)

@@ -101,7 +101,10 @@ int henge_vm_gamepad_ready(void);
 int henge_vm_gamepad(unsigned buttons, int hat, const int32_t axes[6]);
 void henge_vm_gamepad_cancel(void);
 /* HID units: XY 0..32767; pressure 0..4095; tilt hundredths of degrees;
-   twist hundredths of degrees 0..35999. flags tip=1, barrel=2, range=4, invert=8. */
+   twist hundredths of degrees 0..35999. flags tip=1, barrel=2, range=4, invert=8.
+   Desktop clicks use a separate USB Mouse report, never a digitizer contact. */
+enum { HENGE_PEN_DESKTOP_LEFT = 32, HENGE_PEN_DESKTOP_RIGHT = 64, HENGE_PEN_DESKTOP_UP = 128 };
+/* All position/button reports remain ordered on the same USB endpoint. */
 int henge_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags);
 void henge_vm_pen_cancel(void);
 void henge_vm_mouse_button(int button, int down);

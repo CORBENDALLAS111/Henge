@@ -95,6 +95,7 @@ typedef struct HvXhci {
     unsigned pen_ready_logs;
     _Atomic int pen_ready;
     int pen_blocked;
+    unsigned pen_mouse_state, pen_mouse_delivered;
     HvGamepadQueue gamepad;
     _Atomic int gamepad_ready, gamepad_accepting;
     unsigned gamepad_ready_logs;

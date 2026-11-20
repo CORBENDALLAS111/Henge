@@ -9,6 +9,8 @@ struct TouchGestureGuide: View {
                 LabeledContent("Drag or select", value: "Touch and move")
                 LabeledContent("Context menu", value: "Hold still")
                 LabeledContent("Scroll", value: "Move two fingers")
+                Text("Tapping with two fingers does not click in Direct Touch. Use a one-finger hold for the context menu. Choose Touch or Trackpad from the session control bar.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Text("Small movements during a tap are ignored. A contact circle follows your finger and disappears when you lift. The mouse arrow appears again for Pencil hover or a connected mouse.")
                     .font(.footnote).foregroundStyle(.secondary)
             }

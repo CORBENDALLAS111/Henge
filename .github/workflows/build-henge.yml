@@ -69,6 +69,18 @@ jobs:
         working-directory: Henge
         run: make build/henge-agent test-keyboard-input test-apple-account-support test-existing-account-profile test-mdns-proxy test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
+      - name: Check stationary clicks through the macOS HID driver
+        working-directory: Henge
+        run: |
+          make build/test_desktop_hid
+          result=0
+          sudo build/test_desktop_hid || result=$?
+          if [ "$result" = 77 ]; then
+            echo "Runner HID permissions unavailable; actual desktop check skipped, on-device testing required."
+          elif [ "$result" != 0 ]; then
+            exit "$result"
+          fi
+
       - name: Validate VM address reservation preparation
         working-directory: Henge
         run: python3 tests/test_jit_high_room.py

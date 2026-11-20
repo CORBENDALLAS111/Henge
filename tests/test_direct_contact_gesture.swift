@@ -36,6 +36,21 @@ import CoreGraphics
             g.begin(p, tool: .finger, time: t)
             precondition(g.end(p, time: t + 0.05) == [.click(p, count: 1, secondary: false)])
         }
+        var multi = DirectMultiTouchGate()
+        multi.begin(count: 2, time: 30)
+        precondition(!multi.move(distance: 0, count: 2) && !multi.forwarding)
+        precondition(!multi.move(distance: 7, count: 2) && !multi.reveal(time: 30.1), "two-finger tap emits no native trackpad input")
+        precondition(!multi.move(distance: 10, count: 1), "lifting one finger cannot become a one-finger pointer jump")
+        precondition(multi.move(distance: 10, count: 2) && multi.forwarding, "movement activates native scrolling")
+        precondition(!multi.move(distance: 20, count: 2), "start native gesture only once")
+        precondition(!multi.reveal(time: 30.2))
+        multi.reset(); multi.begin(count: 2, time: 40); multi.begin(count: 4, time: 40.05)
+        precondition(multi.reveal(time: 40.2), "four-finger control reveal still works without forwarding a tap")
+        precondition(!multi.reveal(time: 41))
+        multi.reset(); multi.begin(count: 4, time: 50)
+        precondition(multi.move(distance: 9, count: 4) && !multi.reveal(time: 50.2))
+        multi.reset(); multi.begin(count: 1, time: 60)
+        precondition(!multi.move(distance: .nan, count: 1) && multi.move(distance: 9, count: 1))
         print("PASS: finger/Pencil jitter, clicks, double-click, hold context menu, drag and cancellation")
     }
 }

@@ -338,7 +338,7 @@ test-gamepad-sample: $(B)/test_gamepad_sample
 .PHONY: test-gamepad-sample
 
 # Gesture policy is independent of UIKit and a running guest.
-$(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift tests/test_direct_contact_gesture.swift | $(B)
+$(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift ios/Henge/DirectMultiTouchGate.swift tests/test_direct_contact_gesture.swift | $(B)
 	xcrun --sdk macosx swiftc $^ -o $@
 
 test-direct-contact: $(B)/test_direct_contact_gesture
@@ -376,3 +376,6 @@ $(B)/test_existing_account_profile: ios/Henge/SoftwareIdentity.swift ios/Henge/E
 test-existing-account-profile: $(B)/test_existing_account_profile
 	$(B)/test_existing_account_profile
 .PHONY: test-existing-account-profile
+
+$(B)/test_desktop_hid: tests/test_desktop_hid.m devices/absolute_pen.h | $(B)
+	xcrun --sdk macosx clang -fobjc-arc -Idevices $< -framework Foundation -framework IOKit -framework ApplicationServices -o $@

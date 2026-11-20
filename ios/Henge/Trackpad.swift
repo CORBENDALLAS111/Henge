@@ -45,7 +45,10 @@ struct Trackpad: UIViewRepresentable {
         private var holding = false
         private var holdTimer: Timer?
         private let buzz = UIImpactFeedbackGenerator(style: .medium)
-        private var tapsClick: Bool { VolumeClicks.inputMode == .touchscreen }
+        // Direct Touch delegates only scrolling/system gestures here. Its
+        // context click belongs to a one-finger hold, never a two-finger tap.
+        var allowsTouchscreenClicks = true
+        private var tapsClick: Bool { allowsTouchscreenClicks && VolumeClicks.inputMode == .touchscreen }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
