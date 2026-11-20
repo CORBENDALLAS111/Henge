@@ -83,7 +83,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         }
         func setImageFrame(_ frame: CGRect?) {
             guard displayFrame != frame else { return }
-            if let old = displayFrame, let frame, old.size != frame.size { reset() }
+            if let old = displayFrame, let frame, old != frame { reset() }
             displayFrame = frame
             setNeedsLayout()
         }
@@ -163,6 +163,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             CATransaction.commit()
         }
         private func perform(_ actions: [DirectContactGesture.Action], pencilTouch: UITouch? = nil) {
+            let range: Int32 = 4 | (pencilTouch != nil && eraser ? 8 : 0)
             for action in actions {
                 switch action {
                 case .down(let p), .move(let p):
@@ -172,12 +173,12 @@ struct DirectTouchSurface: UIViewRepresentable {
                     } else { contact = send(p, pressure: 1, flags: 5) }
                     if !contact { return }
                 case .up(let p):
-                    send(p, flags: 4); contact = false
+                    send(p, flags: range); contact = false
                 case .click(let p, let count, let secondary):
                     // Each complete pair remains in the USB queue, including fast double-clicks.
                     for _ in 0..<count {
-                        guard send(p, pressure: secondary ? 0 : 1, flags: secondary ? 6 : 5),
-                              send(p, flags: 4) else { return }
+                        guard send(p, pressure: secondary ? 0 : 1, flags: range | (secondary ? 2 : 1)),
+                              send(p, flags: range) else { return }
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }

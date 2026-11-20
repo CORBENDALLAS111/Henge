@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One destination shared by app Settings and the running Mac's Details.
 struct ConnectivityView: View {
@@ -11,12 +12,12 @@ struct ConnectivityView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("iPad connection", value: network.connection)
+                LabeledContent(Device.isPad ? "iPad connection" : "iPhone connection", value: network.connection)
                 LabeledContent("Mac connection", value: "Shared network (NAT)")
                 Toggle("Discover local devices", isOn: $discovery)
                 Text("Find iPhones, shared folders, SSH and screen sharing on the same network. Allow Local Network access when iPadOS asks. Devices must also allow connections from this iPad.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Button("Open iPadOS Settings") {
+                Button("Open Device Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                 }
             } header: { Text("Local network") } footer: {

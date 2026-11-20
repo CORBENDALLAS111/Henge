@@ -574,14 +574,7 @@ struct SessionView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Touch Controls") {
-                    Picker("Mode", selection: $touchMode) {
-                        Text("Trackpad").tag("trackpad")
-                        Text("Direct Touch").tag("direct")
-                    }
-                    .pickerStyle(.segmented)
-                    Text(touchMode == "direct" ? TouchInputSafety.directDescription
-                         : "Swipe to move the pointer; tap to click, hold then move to drag. Pencil still points and draws directly on the Mac image. Touch and Pencil pause while a physical mouse is connected.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    TouchControlOptions(mode: $touchMode)
                 }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {

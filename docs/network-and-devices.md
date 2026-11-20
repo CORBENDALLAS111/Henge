@@ -48,7 +48,11 @@ guest to own. There is no fake Bluetooth or Wi-Fi toggle in macOS settings.
 
 See [the Ventura compatibility experiment](ventura-account-experiment.md) for
 what exists for Apple Account, the exact supported build, diagnostics and the
-remaining MID investigation. No physical Mac's serial is copied and no account
+remaining MID investigation. A packaged diagnostics command is available in Details → Network & Devices;
+open Terminal first, type it using the button, and press Return yourself.
+The script is also available in Shared Files → Henge Support.
+
+No physical Mac's serial is copied and no account
 success is inferred from a generated identity or successful build.
 
 ## Verification
