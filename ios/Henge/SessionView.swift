@@ -38,6 +38,13 @@ struct SessionView: View {
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
 
     @State private var typing = false
+    @AppStorage(SessionKeyboard.modeKey) private var keyboardMode = "manual"
+    @AppStorage(SessionKeyboard.keepSizeKey) private var keepKeyboardSize = true
+    @State private var keyboardRect = CGRect.zero
+    @State private var keyboardFocus = CGPoint(x: 0.5, y: 0.5)
+    @State private var keyboardPan: CGFloat = 0
+    @State private var keyboardPanStart: CGFloat?
+    @State private var keyboardTapAt: TimeInterval?
     @State private var zoomed = false
     @State private var showDetails = false
     @State private var showFiles = false
@@ -85,7 +92,9 @@ struct SessionView: View {
             let full = CGSize(width: geo.size.width + insets.leading + insets.trailing,
                               height: geo.size.height + insets.top + insets.bottom)
             let landscape = full.width > full.height
-            let layout = Layout(full: full, insets: insets, landscape: landscape, zoomed: zoomed, typing: typing, centre: zoomCentre, aspect: mac.aspect)
+            let layout = Layout(full: full, insets: insets, landscape: landscape, zoomed: zoomed, typing: typing && !keepKeyboardSize, centre: zoomCentre, aspect: mac.aspect,
+                                keyboard: typing && keepKeyboardSize && !display.isExternal ? keyboardRect : .zero,
+                                focus: keyboardFocus, pan: keyboardPan)
             ZStack(alignment: .topLeading) {
                 (landscape || zoomed ? Color.black : Desk.page)
                 // One view in every layout: it holds the layer the engine draws into.
@@ -176,8 +185,21 @@ struct SessionView: View {
                         .position(x: layout.touch.midX, y: layout.fillsPhone ? layout.touch.midY : layout.pad.midY)
                 }
                 if let error { errorCard(error, layout) }
+                if typing && keepKeyboardSize && !keyboardRect.isEmpty && !display.isExternal {
+                    Label("Move Mac view", systemImage: "arrow.up.and.down")
+                        .font(.body).padding(.horizontal).frame(height: 44)
+                        .background(Desk.raised, in: Capsule())
+                        .position(x: full.width / 2, y: max(keyboardRect.minY - 24, 24))
+                        .gesture(DragGesture(minimumDistance: 4).onChanged { value in
+                            if keyboardPanStart == nil { keyboardPanStart = keyboardPan }
+                            keyboardPan = (keyboardPanStart ?? 0) + value.translation.height
+                        }.onEnded { _ in keyboardPanStart = nil })
+                        .accessibilityLabel("Move Mac view vertically")
+                        .accessibilityAdjustableAction { direction in keyboardPan += direction == .increment ? 32 : -32 }
+                }
                 KeyboardCatcher(active: $typing).frame(width: 0, height: 0)
             }
+            .background(KeyboardFrameReader { keyboardRect = $0 })
             .onDrop(of: FileTransfers.dropTypes, isTargeted: $fileDropTargeted) { providers in
                 resetPointerInput()
                 let accepted = fileTransfers.accept(providers)
@@ -220,9 +242,20 @@ struct SessionView: View {
         .onReceive(NotificationCenter.default.publisher(for: TouchInputSafety.pencilPresence)) { note in
             pencilInRange = note.userInfo?["present"] as? Bool ?? false
         }
+        .ignoresSafeArea(.keyboard)
+        .onReceive(NotificationCenter.default.publisher(for: SessionKeyboard.directTap)) { note in
+            guard touchInputActive, !display.isExternal,
+                  let x = note.userInfo?["x"] as? Double, let y = note.userInfo?["y"] as? Double else { return }
+            keyboardFocus = CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            keyboardPan = 0
+            if keyboardMode != "manual" { keyboardTapAt = ProcessInfo.processInfo.systemUptime }
+        }
+        .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil } }
+        .onChange(of: keyboardMode == "text" && touchInputActive, initial: true) { _, enabled in henge_share_set_focus_enabled(enabled ? 1 : 0) }
+        .task(id: keyboardMode) { await followKeyboardFocus() }
         .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
         .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
-        .onDisappear { henge_vm_set_cursor_hidden(0) }
+        .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
@@ -290,8 +323,8 @@ struct SessionView: View {
 
     /// Where everything goes, in points from the device's top left corner.
     private struct Layout {
-        let screen: CGRect
-        let touch: CGRect     // what is a trackpad besides the pad itself
+        var screen: CGRect
+        var touch: CGRect     // what is a trackpad besides the pad itself
         let fillsPhone: Bool
         let toolsY: CGFloat
         let pad: CGRect
@@ -302,7 +335,7 @@ struct SessionView: View {
             CGSize(width: min(touch.width / max(screen.width, 1), 1), height: min(touch.height / max(screen.height, 1), 1))
         }
 
-        init(full: CGSize, insets: EdgeInsets, landscape: Bool, zoomed: Bool, typing: Bool, centre: CGPoint, aspect: CGFloat) {
+        init(full: CGSize, insets: EdgeInsets, landscape: Bool, zoomed: Bool, typing: Bool, centre: CGPoint, aspect: CGFloat, keyboard: CGRect = .zero, focus: CGPoint = CGPoint(x: 0.5, y: 0.5), pan: CGFloat = 0) {
             self.insets = insets
             let big = full.height >= 600 // an iPad on its side, or a window on one
             if zoomed {
@@ -352,6 +385,27 @@ struct SessionView: View {
                 let bottom = full.height - insets.bottom - (typing ? 8 : 0)
                 pad = CGRect(x: 8, y: top, width: width, height: max(bottom - top, 60))
             }
+            if !keyboard.isEmpty {
+                screen = KeyboardViewport.frame(screen, keyboard: keyboard, focus: focus, pan: pan)
+                touch = CGRect(origin: .zero, size: full)
+            }
+        }
+    }
+
+    @MainActor private func followKeyboardFocus() async {
+        while !Task.isCancelled {
+            if let tapped = keyboardTapAt {
+                let elapsed = ProcessInfo.processInfo.systemUptime - tapped
+                if elapsed > 2 || !touchInputActive { keyboardTapAt = nil }
+                else if elapsed >= 0.18 && henge_vm_pen_idle() != 0 {
+                    var rect = [Double](repeating: 0, count: 4), age = 0.0
+                    let focused = rect.withUnsafeMutableBufferPointer { henge_share_focus($0.baseAddress, &age) }
+                    if keyboardMode == "tap" || (keyboardMode == "text" && focused == 1 && age < elapsed - 0.15) {
+                        typing = true; keyboardTapAt = nil
+                    }
+                }
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
@@ -576,6 +630,7 @@ struct SessionView: View {
                 Section("Touch Controls") {
                     TouchControlOptions(mode: $touchMode)
                 }
+                Section("Keyboard") { KeyboardOptions() }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {
                         Text("1×").tag(1)

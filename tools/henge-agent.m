@@ -1,7 +1,9 @@
 // Runs inside macOS on a Henge virtual Mac, as a LaunchAgent. It keeps the clipboard in step with the device,
 // and keeps the shared folder mounted. It talks to host/share.c at 10.0.2.4, which only exists inside Henge.
 #import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
 #include <arpa/inet.h>
+#include <math.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -118,11 +120,63 @@ static void keepMounted(void) {
     [task launchAndReturnError:NULL];
 }
 
+// Opt-in accessibility reads roles and geometry only, never field values.
+static BOOL focusBusy, focusPrompted;
+static NSString *focusReport(void) {
+    if (!AXIsProcessTrusted()) {
+        if(!focusPrompted) {
+            focusPrompted=YES;
+            AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt:@YES});
+        }
+        return @"-1 0 0 0 0";
+    }
+    AXUIElementRef system=AXUIElementCreateSystemWide(); CFTypeRef item=NULL;
+    AXError error=AXUIElementCopyAttributeValue(system,kAXFocusedUIElementAttribute,&item);
+    CFRelease(system);
+    if(error!=kAXErrorSuccess || !item) return @"0 0 0 0 0";
+    CFTypeRef role=NULL, position=NULL, size=NULL;
+    AXUIElementCopyAttributeValue((AXUIElementRef)item,kAXRoleAttribute,&role);
+    BOOL editable=role && [@[ @"AXTextField", @"AXTextArea", @"AXComboBox", @"AXSearchField" ] containsObject:(__bridge id)role];
+    CGPoint p=CGPointZero; CGSize z=CGSizeZero;
+    if(editable) {
+        AXUIElementCopyAttributeValue((AXUIElementRef)item,kAXPositionAttribute,&position);
+        AXUIElementCopyAttributeValue((AXUIElementRef)item,kAXSizeAttribute,&size);
+        if(position && CFGetTypeID(position)==AXValueGetTypeID() && AXValueGetType((AXValueRef)position)==kAXValueCGPointType)
+            AXValueGetValue((AXValueRef)position,kAXValueCGPointType,&p);
+        if(size && CFGetTypeID(size)==AXValueGetTypeID() && AXValueGetType((AXValueRef)size)==kAXValueCGSizeType)
+            AXValueGetValue((AXValueRef)size,kAXValueCGSizeType,&z);
+    }
+    if(role)CFRelease(role); if(position)CFRelease(position); if(size)CFRelease(size); CFRelease(item);
+    NSRect screen=NSScreen.screens.firstObject.frame;
+    double w=MAX(screen.size.width,1),h=MAX(screen.size.height,1);
+    double x=fmin(fmax(p.x/w,0),1),y=fmin(fmax(p.y/h,0),1);
+    double width=fmin(fmax(z.width/w,0),1-x),height=fmin(fmax(z.height/h,0),1-y);
+    return [NSString stringWithFormat:@"%d %.6f %.6f %.6f %.6f",editable?1:0,x,y,width,height];
+}
+static void checkFocus(void) {
+    if(focusBusy) return;
+    focusBusy=YES;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+        int status=0;
+        NSData *config=request(@"GET",@"/.henge/input-settings",nil,&status,NULL);
+        NSString *text=config ? [[NSString alloc] initWithData:config encoding:NSUTF8StringEncoding] : nil;
+        if(status!=200 || ![text hasPrefix:@"enabled=1"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{ focusBusy=NO; focusPrompted=NO; });
+            return;
+        }
+        __block NSString *report;
+        dispatch_sync(dispatch_get_main_queue(), ^{ report=focusReport(); });
+        request(@"PUT",@"/.henge/focus",[report dataUsingEncoding:NSUTF8StringEncoding],&status,NULL);
+        dispatch_async(dispatch_get_main_queue(), ^{ focusBusy=NO; });
+    });
+}
+
 int main(void) {
     @autoreleasepool {
         lastChange = NSPasteboard.generalPasteboard.changeCount;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ followDevice(); });
         keepMounted();
+        [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *timer) { (void)timer; checkFocus(); }];
         [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) { (void)timer; checkClipboard(); }];
         [NSTimer scheduledTimerWithTimeInterval:30 repeats:YES block:^(NSTimer *timer) { (void)timer; keepMounted(); }];
         [NSRunLoop.mainRunLoop run];

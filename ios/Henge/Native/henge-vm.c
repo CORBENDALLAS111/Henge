@@ -424,6 +424,8 @@ void henge_vm_share(const char *folder, const char *socket_path, const char *age
 }
 void henge_share_set_clipboard(const char *text) { hv_share_set_clipboard(text); }
 char *henge_share_take_clipboard(void) { return hv_share_take_clipboard(); }
+void henge_share_set_focus_enabled(int enabled) { hv_share_set_focus_enabled(enabled); }
+int henge_share_focus(double bounds[4], double *age) { return hv_share_focus(bounds,age); }
 long henge_share_agent_seen(void) { return hv_share_agent_seen(); }
 
 void henge_vm_set_display(uint32_t width, uint32_t height) { hv_pvg_lite_set_mode(width, height); }
@@ -448,6 +450,12 @@ void henge_vm_pointer_reset(void) {
     if (!lock_running()) return;
     hv_vm_pointer_reset();
     pthread_rwlock_unlock(&api_lock);
+}
+int henge_vm_pen_idle(void) {
+    if (!lock_running()) return 0;
+    int idle = hv_vm_pen_idle();
+    pthread_rwlock_unlock(&api_lock);
+    return idle;
 }
 int henge_vm_pen_ready(void) {
     if (!lock_running()) return 0;

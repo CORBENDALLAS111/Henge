@@ -166,7 +166,7 @@ static void pen_detach(HvXhci *x) {
     atomic_store(&x->pen_ready, 0);
     x->pen_head = x->pen_tail = 0;
     x->pen_blocked = 0;
-    x->pen_last_report_ns = 0;
+    x->pen_last_report_ns = x->pen_button_changed_ns = 0;
     memset(x->pen_state, 0, sizeof x->pen_state);
     memset(x->pen_delivered_state, 0, sizeof x->pen_delivered_state);
     pthread_mutex_unlock(&x->mu);
@@ -596,11 +596,22 @@ static void run_ep_in(HvXhci *x, int slot) {
                A backwards host clock after snapshot restore is immediately due. */
             uint64_t now = hid_now_ns(), previous = x->pen_last_report_ns;
             if (previous && now >= previous && now - previous < (uint64_t)HV_PEN_INTERVAL_MS * 1000000) break;
+            const uint8_t *next = x->pen_reports[x->pen_head % HV_PEN_REPORTS];
+            unsigned old_buttons = x->pen_delivered_state[0] & (HV_PEN_TIP | HV_PEN_BARREL);
+            unsigned new_buttons = next[0] & (HV_PEN_TIP | HV_PEN_BARREL);
+            uint64_t changed = x->pen_button_changed_ns;
+            int leaving = (x->pen_delivered_state[0] & HV_PEN_RANGE) && !(next[0] & HV_PEN_RANGE);
+            // Preserve clicks for a slower desktop consumer, while same-state
+            // hover/drag motion still uses the advertised 1 ms USB interval.
+            if ((old_buttons != new_buttons || leaving) && changed && now >= changed &&
+                now - changed < (uint64_t)HV_PEN_EDGE_DWELL_MS * 1000000) break;
             ring_advance(r);
             uint32_t want = trb[2] & 0x1ffff;
             uint32_t n = want < HV_PEN_REPORT_LEN ? want : HV_PEN_REPORT_LEN;
             uint8_t *report = x->pen_reports[x->pen_head++ % HV_PEN_REPORTS];
             wr(x, (uint64_t)trb[1] << 32 | trb[0], report, n);
+            if (old_buttons != new_buttons)
+                x->pen_button_changed_ns = new_buttons || changed ? now : 0;
             memcpy(x->pen_delivered_state, report, HV_PEN_REPORT_LEN);
             x->pen_last_report_ns = now;
             x->pen_delivered++;
@@ -1094,6 +1105,7 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
    ordered. Cancellation releases at the last DELIVERED position, not a queued
    future position, so changing input owners never teleports the cursor. */
 static void pen_cancel_locked(HvXhci *x) {
+    x->pen_button_changed_ns = 0; /* cancellation releases immediately */
     x->pen_head = x->pen_tail = 0;
     memcpy(x->pen_state, x->pen_delivered_state, HV_PEN_REPORT_LEN);
     if (x->pen_state[0] & HV_PEN_RANGE) {
@@ -1105,6 +1117,14 @@ static void pen_cancel_locked(HvXhci *x) {
     }
 }
 
+int hv_xhci_pen_idle(HvXhci *x) {
+    if (!x) return 0;
+    pthread_mutex_lock(&x->mu);
+    int idle = atomic_load(&x->pen_ready) && x->pen_head == x->pen_tail &&
+        !(x->pen_delivered_state[0] & (HV_PEN_TIP | HV_PEN_BARREL));
+    pthread_mutex_unlock(&x->mu);
+    return idle;
+}
 int hv_xhci_pen_ready(HvXhci *x) { return x && atomic_load(&x->pen_ready); }
 
 void hv_xhci_pen_cancel(HvXhci *x) {

@@ -103,6 +103,7 @@ void hv_vm_key_hid(uint8_t usage, int down); /* HID keyboard usage, which is wha
 void hv_vm_mouse_move(int dx, int dy);
 void hv_vm_pointer_reset(void); /* discard queued pointer input and release buttons */
 int hv_vm_pen_ready(void);
+int hv_vm_pen_idle(void);
 int hv_vm_gamepad_ready(void);
 int hv_vm_gamepad(unsigned buttons, int hat, const int axes[6]);
 void hv_vm_gamepad_cancel(void);

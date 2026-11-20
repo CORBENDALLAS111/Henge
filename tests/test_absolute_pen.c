@@ -27,12 +27,45 @@ int hv_pcie_attach(HvPcie *p, HvPciDev *d) { (void)p; (void)d; return 0; }
 static unsigned u16(const uint8_t *p) { return p[0] | (unsigned)p[1] << 8; }
 static const uint8_t *received(unsigned index) { return guest + 0x4000 + 16 * index; }
 static void deliver_pending(HvXhci *x) {
-    unsigned guard = HV_PEN_REPORTS + 1;
+    unsigned guard = HV_PEN_REPORTS * (HV_PEN_EDGE_DWELL_MS + 2);
     while (x->pen_head != x->pen_tail && guard--) {
         input_time_ns += 1000000;
         run_ep_in(x, 3);
     }
     assert(x->pen_head == x->pen_tail);
+}
+
+static void test_stationary_clicks(void) {
+    memset(guest, 0, sizeof guest);
+    HvXhci *x = hv_xhci_create(NULL, NULL); assert(x);
+    x->slots[3].dev = 2; x->slots[3].configured = 1;
+    x->slots[3].ep_running[3] = 1; x->slots[3].ep[3] = (HvXhciRing){0x1000, 1};
+    for (unsigned i = 0; i < 32; i++) {
+        uint32_t t[] = {0x4000+i*16, 0, HV_PEN_REPORT_LEN, TRB_NORMAL<<10|1};
+        memcpy(guest+0x1000+i*16,t,sizeof t);
+    }
+    run_ep_in(x,3); assert(hv_xhci_pen_idle(x));
+    for (int i=0;i<2;i++) {
+        assert(!hv_xhci_pen(x,12000,8000,0,0,0,0,4));
+        assert(!hv_xhci_pen(x,12000,8000,4095,0,0,0,5));
+        assert(!hv_xhci_pen(x,12000,8000,0,0,0,0,4));
+        assert(!hv_xhci_pen(x,12000,8000,0,0,0,0,0));
+    }
+    assert(!hv_xhci_pen_idle(x));
+    unsigned downs=0, ups=0; int was_down=0;
+    // The former 1-ms-only transport loses every stationary edge before
+    // this deliberately slower consumer's first 16-ms sample.
+    for (int ms=1;ms<=300;ms++) {
+        input_time_ns+=1000000; run_ep_in(x,3);
+        if (ms%16==0) {
+            int down=(x->pen_delivered_state[0]&HV_PEN_TIP)!=0;
+            if(down && !was_down) downs++;
+            if(!down && was_down) ups++;
+            was_down=down;
+        }
+    }
+    assert(downs==2 && ups==2 && hv_xhci_pen_idle(x));
+    pthread_mutex_destroy(&x->mu); free(x);
 }
 
 int main(void) {
@@ -106,9 +139,11 @@ int main(void) {
     for (int i = 0; i < 8; i++) {
         for (int phase = 0; phase < 4; phase++) {
             unsigned before = (unsigned)x->pen_delivered;
-            input_time_ns += 1000000;
-            run_ep_in(x, 3);
+            uint64_t began = input_time_ns;
+            do { input_time_ns += 1000000; run_ep_in(x, 3); }
+            while (x->pen_delivered == before && input_time_ns - began < (HV_PEN_EDGE_DWELL_MS + 2ull) * 1000000);
             assert(x->pen_delivered == before + 1);
+            if (phase == 2) assert(input_time_ns - began >= HV_PEN_EDGE_DWELL_MS * 1000000ull);
             const uint8_t *r = received(clicks_at + 4 * i + phase);
             assert(r[0] == (phase == 1 ? (5 | HV_PEN_PRIMARY) : phase == 3 ? 0 : 4));
             assert(u16(r + 1) == (unsigned)(1000 + i));
@@ -141,6 +176,7 @@ int main(void) {
     assert((int16_t)u16(sample + 7) == -9000 && (int16_t)u16(sample + 9) == 9000 && u16(sample + 11) == 35999);
     reset(x); assert(!hv_xhci_pen_ready(x) && !x->pen_state[0] && x->pen_head == x->pen_tail);
     pthread_mutex_destroy(&x->mu); free(x);
+    test_stationary_clicks();
     puts("PASS: USB pen readiness/reports, 1 ms interrupt service, short taps after guest stall, backwards host clock, motion coalescing, cancellation and overflow release");
     return 0;
 }

@@ -78,6 +78,8 @@ void henge_vm_share(const char *folder, const char *socket_path, const char *age
 void henge_share_set_clipboard(const char *text);
 char *henge_share_take_clipboard(void);
 long henge_share_agent_seen(void);
+void henge_share_set_focus_enabled(int enabled);
+int henge_share_focus(double bounds[4], double *age);
 
 /* The size macOS is told its screen is. Before henge_vm_boot. */
 void henge_vm_set_display(uint32_t width, uint32_t height);
@@ -93,6 +95,7 @@ void henge_vm_key_hid(uint8_t usage, int down); /* a hardware keyboard: iOS give
 void henge_vm_mouse_move(int dx, int dy);
 void henge_vm_pointer_reset(void);
 int henge_vm_pen_ready(void);
+int henge_vm_pen_idle(void);
 /* One generic USB gamepad, independent of Bluetooth pairing on the host. */
 int henge_vm_gamepad_ready(void);
 int henge_vm_gamepad(unsigned buttons, int hat, const int32_t axes[6]);

@@ -50,7 +50,7 @@ RESTORE_OBJ = $(patsubst third_party/%.c,$(RB)/%.o,$(IRECV_SRC) $(MUXD_SRC) $(ID
 # The helper that runs inside macOS on a virtual Mac (share.c serves it to the guest).
 $(B)/henge-agent: tools/henge-agent.m
 	@mkdir -p $(B)
-	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit $< -o $@
+	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit -framework ApplicationServices $< -o $@
 	codesign -f -s - $@
 
 # Compressed in the app: tools that sign an IPA would try to sign a bare Mach-O too.
@@ -359,3 +359,13 @@ $(B)/test_apple_account_support: ios/Henge/AppleAccountSupport.swift tests/test_
 test-apple-account-support: $(B)/test_apple_account_support
 	$(B)/test_apple_account_support
 .PHONY: test-apple-account-support
+
+# Keyboard viewport is independent of UIKit; guest focus is a metadata-only HTTP channel.
+$(B)/test_keyboard_viewport: ios/Henge/KeyboardViewport.swift tests/test_keyboard_viewport.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+$(B)/test_input_focus: tests/test_input_focus.c host/share.c host/share.h host/input_focus.h | $(B)
+	$(CC) $(CFLAGS) -pthread tests/test_input_focus.c host/share.c -o $@
+test-keyboard-input: $(B)/test_keyboard_viewport $(B)/test_input_focus
+	$(B)/test_keyboard_viewport
+	$(B)/test_input_focus
+.PHONY: test-keyboard-input

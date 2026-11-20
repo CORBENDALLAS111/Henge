@@ -112,6 +112,8 @@ struct SettingsView: View {
                     NavigationLink("Apple Account & App Store") { AppleAccountSetupView() }
                 }
                 .listRowBackground(Desk.card)
+                Section("Keyboard") { KeyboardOptions() }
+                .listRowBackground(Desk.card)
                 Section("Performance") {
                     Picker("Mac refresh rate", selection: $refreshRate) {
                         Text("30 Hz").tag(30)

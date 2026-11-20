@@ -180,6 +180,11 @@ struct DirectTouchSurface: UIViewRepresentable {
                         guard send(p, pressure: secondary ? 0 : 1, flags: range | (secondary ? 2 : 1)),
                               send(p, flags: range) else { return }
                     }
+                    if !secondary {
+                        NotificationCenter.default.post(name: SessionKeyboard.directTap, object: nil, userInfo: [
+                            "x": Double((p.x - imageBounds.minX) / max(imageBounds.width, 1)),
+                            "y": Double((p.y - imageBounds.minY) / max(imageBounds.height, 1))])
+                    }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
             }

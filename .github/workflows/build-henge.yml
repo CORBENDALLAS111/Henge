@@ -67,7 +67,7 @@ jobs:
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
         working-directory: Henge
-        run: make test-apple-account-support test-mdns-proxy test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
+        run: make test-keyboard-input test-apple-account-support test-mdns-proxy test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
       - name: Validate VM address reservation preparation
         working-directory: Henge
@@ -160,6 +160,23 @@ jobs:
           name: Henge-xcode-buildlog-${{ github.sha }}
           path: Henge/ios/build/DerivedData.buildlog
           if-no-files-found: warn
+
+      - name: Verify packaged keyboard helper and source revision
+        working-directory: Henge
+        run: |
+          python3 - <<'PY'
+          import gzip, os, plistlib, zipfile
+          with zipfile.ZipFile('/Users/runner/Desktop/Henge.ipa') as z:
+              assert z.testzip() is None
+              root = 'Payload/Henge.app/'
+              info = plistlib.loads(z.read(root + 'Info.plist'))
+              assert info['HengeBuildCommit'] == os.environ['GITHUB_SHA'][:12]
+              assert info['MinimumOSVersion'] == '17.0'
+              assert z.read(root + 'check-apple-services.sh') == open('tools/check-apple-services.sh','rb').read()
+              helper = gzip.decompress(z.read(root + 'henge-agent.gz'))
+              assert b'/.henge/focus' in helper and b'/.henge/input-settings' in helper
+              print('PASS: IPA integrity, source revision, iOS target, diagnostics and focus-enabled guest helper')
+          PY
 
       - name: Upload Henge.ipa
         uses: actions/upload-artifact@v4

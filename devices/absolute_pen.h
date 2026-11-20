@@ -7,6 +7,7 @@
 #define HV_PEN_REPORT_LEN 13
 #define HV_PEN_REPORTS 128
 #define HV_PEN_INTERVAL_MS 1
+#define HV_PEN_EDGE_DWELL_MS 50 /* preserve desktop click edges across guest sampling */
 #define HV_PEN_TIP 1
 #define HV_PEN_BARREL 2
 #define HV_PEN_RANGE 4

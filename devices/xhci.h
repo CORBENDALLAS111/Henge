@@ -91,7 +91,7 @@ typedef struct HvXhci {
     uint8_t pen_state[HV_PEN_REPORT_LEN], pen_delivered_state[HV_PEN_REPORT_LEN];
     uint32_t pen_head, pen_tail;
     uint64_t pen_delivered, pen_overflows;
-    uint64_t pen_last_report_ns;
+    uint64_t pen_last_report_ns, pen_button_changed_ns;
     unsigned pen_ready_logs;
     _Atomic int pen_ready;
     int pen_blocked;
@@ -120,6 +120,7 @@ void hv_xhci_touch_button(HvXhci *x, int down);
 int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y, int twist, int flags);
 void hv_xhci_pen_cancel(HvXhci *x);
 int hv_xhci_pen_ready(HvXhci *x);
+int hv_xhci_pen_idle(HvXhci *x);
 int hv_xhci_gamepad(HvXhci *x, unsigned buttons, int hat, const int axes[6]);
 void hv_xhci_gamepad_cancel(HvXhci *x);
 int hv_xhci_gamepad_ready(HvXhci *x);
