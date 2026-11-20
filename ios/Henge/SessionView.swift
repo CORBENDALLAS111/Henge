@@ -75,6 +75,10 @@ struct SessionView: View {
         henge_vm_pointer_reset()
     }
 
+    private var hideGuestCursor: Bool {
+        touchMode == "direct" && touchInputActive && !display.isExternal && !pencilInRange && !HardwareMouse.shared.hasMouse
+    }
+
     var body: some View {
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
@@ -216,6 +220,8 @@ struct SessionView: View {
         .onReceive(NotificationCenter.default.publisher(for: TouchInputSafety.pencilPresence)) { note in
             pencilInRange = note.userInfo?["present"] as? Bool ?? false
         }
+        .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
+        .onDisappear { henge_vm_set_cursor_hidden(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }

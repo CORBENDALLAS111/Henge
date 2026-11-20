@@ -18,7 +18,7 @@ name: Build Henge IPA
 on:
   workflow_dispatch: {}
   push:
-    branches: [main]
+    branches: [main, fix/direct-touch-gestures]
 
 env:
   HUSK: ${{ github.workspace }}/Husk
@@ -29,7 +29,7 @@ env:
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-ipa]')
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/fix/direct-touch-gestures' || contains(github.event.head_commit.message, '[build-ipa]')
     # Xcode 27 image (arm64, GA since Oct 2026). Plain `xcode-27` is a standard
     # runner, so it's free on public repos; `xcode-27-xlarge` is a paid larger
     # runner. Table: https://github.com/actions/runner-images#available-images
@@ -62,7 +62,7 @@ jobs:
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
         working-directory: Henge
-        run: make test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
+        run: make test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
       - name: Build and verify the macOS sample disk image
         working-directory: Henge

@@ -77,6 +77,7 @@ struct HvPvgLite {
     uint64_t barriers, barrier_drains, barrier_retries, barrier_timeouts;
     CFTypeRef layer; /* retained until replaced; layer_lock serializes lazy replay handoff */
     os_unfair_lock layer_lock;
+    int touch_cursor_hidden;
     int layer_set; /* an explicit NULL also overrides the renderer's Mac test layer */
     uint32_t task_root[512]; /* page of each task's root, by the id in commands */
     uint64_t task_objects[512], task_placement[512]; /* task offsets of its object lists */
@@ -387,6 +388,14 @@ void hv_pvg_lite_complete(HvPvgLite *p, uint32_t ch, uint32_t stamp) {
     if (p->m->ncpus == 1) hv_machine_wake(p->m);
 }
 
+void hv_pvg_lite_set_cursor_hidden(HvPvgLite *p, int hidden) {
+    if (!p) return;
+    os_unfair_lock_lock(&p->layer_lock);
+    p->touch_cursor_hidden = hidden != 0;
+    hv_pvg_metal_set_cursor_hidden(atomic_load_explicit(&p->metal, memory_order_acquire), hidden);
+    os_unfair_lock_unlock(&p->layer_lock);
+}
+
 void hv_pvg_lite_set_layer(HvPvgLite *p, void *layer) {
     if (!p) return;
     CFTypeRef retained = layer ? CFRetain(layer) : NULL;
@@ -588,6 +597,7 @@ static void ensure_metal(HvPvgLite *p) {
     if (!p->metal_tried) {
         p->metal_tried = 1;
         HvPvgMetal *metal = getenv("HV_PVG_NO_METAL") ? NULL : hv_pvg_metal_create(p);
+        if (metal) hv_pvg_metal_set_cursor_hidden(metal, p->touch_cursor_hidden);
         if (metal && p->layer_set) hv_pvg_metal_set_layer(metal, (void *)p->layer);
         atomic_store_explicit(&p->metal, metal, memory_order_release);
     }

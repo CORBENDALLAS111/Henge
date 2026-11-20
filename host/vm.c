@@ -237,6 +237,15 @@ static void on_ill(int sig, siginfo_t *info, void *ctx) {
 
 void (*hv_prof_register)(void);
 
+static int touch_cursor_hidden; /* display_lock */
+void hv_vm_set_cursor_hidden(int hidden) {
+    os_unfair_lock_lock(&display_lock);
+    touch_cursor_hidden = hidden != 0;
+    HvPvgLite *pvg = atomic_load_explicit(&display_pvg, memory_order_acquire);
+    if (pvg) hv_pvg_lite_set_cursor_hidden(pvg, hidden);
+    os_unfair_lock_unlock(&display_lock);
+}
+
 void hv_vm_set_display_layer(void *layer) {
     CFTypeRef retained = layer ? CFRetain(layer) : NULL;
     os_unfair_lock_lock(&display_lock);
@@ -324,6 +333,7 @@ int hv_vm_create(const HvVmConfig *c, char *err, size_t errlen) {
     // The setter and publication share this lock: an older preboot target can
     // never overwrite a monitor change made while the board was being built.
     os_unfair_lock_lock(&display_lock);
+    if (board.pvg) hv_pvg_lite_set_cursor_hidden(board.pvg, touch_cursor_hidden);
     if (display_layer_set && board.pvg) hv_pvg_lite_set_layer(board.pvg, (void *)display_layer);
     atomic_store_explicit(&display_pvg, board.pvg, memory_order_release);
     os_unfair_lock_unlock(&display_lock);

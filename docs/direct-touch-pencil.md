@@ -14,15 +14,27 @@ a port bitmask (the distinction matters when adding the third port).
   custom guest resolution, Retina scaling and macOS mouse acceleration. The
   surface follows the actual displayed image, including zoom/cropping; automatic
   cursor-follow panning pauses in Direct Touch to keep that mapping stable.
-- A finger tap clicks at that position. An 80 ms classification interval allows
-  a second finger to join before committing the first button-down. A fast tap
-  still emits down/up at its starting position; movement preserves the initial
-  down before subsequent drag motion. Holding maintains contact for window/icon
-  dragging and text selection. Two or more fingers use the existing Mac trackpad
-  gesture path; switching to it first cancels pen contact.
-- Pencil uses precise/coalesced coordinates, tip pressure 0…4095, tilt, hover and
-  proximity. On iPadOS 17.5+, Pencil Pro barrel roll becomes HID Twist. Finger
-  touches are ignored during Pencil contact and briefly after Pencil activity.
+- Finger tap: a complete left click at touch-down, emitted on lift. Movement
+  under 10 view points is jitter, not drag. Two taps produce two click pairs.
+  Moving at least 10 points starts a drag at the original object. Holding still
+  for 550 ms opens its context menu once; further motion cannot start a drag.
+  Two or more fingers keep the existing Mac trackpad gesture path.
+- Pencil tap: left click on lift; moving 4 points starts a drag with precise,
+  coalesced pressure/tilt/roll samples. Holding still for 450 ms then lifting
+  sends two complete left clicks. No click is sent by that hold while the tip
+  remains down, so holding then moving can still drag. Hover positions the
+  cursor without pressing. Finger touches are rejected during Pencil activity.
+- Direct finger mode hides the composited guest arrow and shows a 36-point
+  contact ring only while touching. Pencil proximity, Trackpad, a physical mouse
+  or external display restores the guest arrow. This is host presentation state,
+  separate from the guest's cursor visibility and snapshot contents.
+- The pen descriptor mirrors Tip Switch as Button 1 in the former padding bit.
+  Apple's `createDigitizerTransducerEventForReport` treats Tip Switch as touch,
+  separately from ButtonMask, while the legacy handler treats it as button 1.
+  Advertising both supports both paths without a second mouse device or relative
+  pointer steering. The report remains 13 bytes. A clean shutdown/cold boot is
+  required to enumerate the revised descriptor; runtime acceptance on Ventura
+  still requires device testing.
 - Double-tap and Pencil Pro squeeze respect the user's preferred Pencil action:
   eraser/previous-tool switches the HID inverted-stylus state; palette actions
   map to a context click at the supplied hover pose or a recent hover location.
@@ -96,3 +108,7 @@ retain the existing trackpad rectangle. Hover/contact ordering, current-sample
 corrections and post-lift proximity lifetime are described and tested in
 [pencil-devices-files.md](pencil-devices-files.md). This build adds a separate
 USB gamepad on port 4; the pen's report descriptor remains unchanged.
+
+Gesture reference: [Windows App touch and pen](https://learn.microsoft.com/en-us/windows-app/input-keyboard-mouse-touch-pen?tabs=ios-ipados).
+Henge follows direct-position taps and one-finger hold for context menus; Pencil
+hold-to-double-click is an additional desktop shortcut requested for this fork.

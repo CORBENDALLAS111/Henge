@@ -1,0 +1,51 @@
+import Foundation
+
+/// Desktop gesture classification in view points, before any guest button-down.
+/// A held Pencil produces a double-click only on lift, so it can still become a drag.
+struct DirectContactGesture {
+    enum Tool { case finger, pencil }
+    enum Action: Equatable {
+        case down(CGPoint), move(CGPoint), up(CGPoint)
+        case click(CGPoint, count: Int, secondary: Bool)
+    }
+    private enum Phase { case idle, pending, dragging, consumed }
+    private var phase = Phase.idle
+    private var tool = Tool.finger
+    private var origin = CGPoint.zero
+    private var began: TimeInterval = 0
+    static let contextDelay: TimeInterval = 0.55
+    static let pencilDoubleDelay: TimeInterval = 0.45
+
+    mutating func begin(_ point: CGPoint, tool: Tool, time: TimeInterval) {
+        self.tool = tool; origin = point; began = time; phase = .pending
+    }
+    mutating func move(_ point: CGPoint) -> [Action] {
+        switch phase {
+        case .pending:
+            let distance = hypot(point.x - origin.x, point.y - origin.y)
+            guard distance >= (tool == .finger ? 10 : 4) else { return [] }
+            phase = .dragging
+            return [.down(origin), .move(point)]
+        case .dragging: return [.move(point)]
+        default: return []
+        }
+    }
+    mutating func hold(time: TimeInterval) -> [Action] {
+        guard phase == .pending, tool == .finger, time - began >= Self.contextDelay else { return [] }
+        phase = .consumed
+        return [.click(origin, count: 1, secondary: true)]
+    }
+    mutating func end(_ point: CGPoint, time: TimeInterval) -> [Action] {
+        defer { phase = .idle }
+        switch phase {
+        case .pending:
+            // Never drag on lift: minor touch-up jitter remains a click at touch-down.
+            let duration = time - began
+            return [.click(origin, count: tool == .pencil && duration >= Self.pencilDoubleDelay ? 2 : 1,
+                           secondary: tool == .finger && duration >= Self.contextDelay)]
+        case .dragging: return [.move(point), .up(point)]
+        default: return []
+        }
+    }
+    mutating func reset() { phase = .idle }
+}
