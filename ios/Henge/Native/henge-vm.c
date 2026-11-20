@@ -519,6 +519,9 @@ void henge_vm_touch_button(int down) {
     hv_vm_touch_button(down);
     pthread_rwlock_unlock(&api_lock);
 }
+int henge_vm_local_discovery_status(void) { return hv_dns_proxy_local_status(); }
+void henge_vm_set_local_discovery(int enabled) { hv_dns_proxy_set_local(enabled); }
+void henge_vm_set_cursor_hidden(int hidden) { hv_vm_set_cursor_hidden(hidden); }
 void henge_vm_set_display_layer(void *layer) {
     /* vm.c serializes this with unpublishing the old display before free.
        Main-thread layer detachment need not wait for disk/GPU teardown. */

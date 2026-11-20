@@ -336,3 +336,19 @@ $(B)/test_gamepad_sample: ios/Henge/GamepadSample.swift tests/test_gamepad_sampl
 test-gamepad-sample: $(B)/test_gamepad_sample
 	$(B)/test_gamepad_sample
 .PHONY: test-gamepad-sample
+
+# Gesture policy is independent of UIKit and a running guest.
+$(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift tests/test_direct_contact_gesture.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+
+test-direct-contact: $(B)/test_direct_contact_gesture
+	$(B)/test_direct_contact_gesture
+.PHONY: test-direct-contact
+
+# Fake DNSService callbacks exercise production Bonjour packet code without LAN access.
+$(B)/test_mdns_proxy: tests/test_mdns_proxy.c host/dns_proxy.c host/dns_proxy.h | $(B)
+	$(CC) $(CFLAGS) -pthread tests/test_mdns_proxy.c -o $@
+
+test-mdns-proxy: $(B)/test_mdns_proxy
+	$(B)/test_mdns_proxy
+.PHONY: test-mdns-proxy

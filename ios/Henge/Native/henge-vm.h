@@ -119,6 +119,9 @@ int henge_vm_snapshot(uint8_t *bgra, int width, int height);
    the kernel has not got that far. A successful call returns an owned copy;
    release it with henge_vm_free_display after use. */
 /// Where the Mac's GPU frames go: a CAMetalLayer. Keep it alive while the machine runs.
+void henge_vm_set_local_discovery(int enabled);
+int henge_vm_local_discovery_status(void);
+void henge_vm_set_cursor_hidden(int hidden);
 void henge_vm_set_display_layer(void *layer);
 /// How many frames have gone to it.
 uint64_t henge_vm_gpu_frames(void);

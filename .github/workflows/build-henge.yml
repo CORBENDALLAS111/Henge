@@ -18,7 +18,7 @@ name: Build Henge IPA
 on:
   workflow_dispatch: {}
   push:
-    branches: [main]
+    branches: [main, fix/direct-touch-gestures]
 
 env:
   HUSK: ${{ github.workspace }}/Husk
@@ -29,7 +29,7 @@ env:
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-ipa]')
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/fix/direct-touch-gestures' || contains(github.event.head_commit.message, '[build-ipa]')
     # Xcode 27 image (arm64, GA since Oct 2026). Plain `xcode-27` is a standard
     # runner, so it's free on public repos; `xcode-27-xlarge` is a paid larger
     # runner. Table: https://github.com/actions/runner-images#available-images
@@ -57,12 +57,17 @@ jobs:
         run: |
           find ios/Henge ios/HengeJITHelper -name '*.swift' -print0 | xargs -0 xcrun swiftc -frontend -parse
           bash -n tools/check-apple-services.sh
+          cmp tools/check-apple-services.sh ios/Henge/Resources/check-apple-services.sh
+
+      - name: Compile app sources and display routing
+        working-directory: Henge
+        run: bash ios/scripts/check_display.sh
 
       # These fixtures need only the runner's Xcode, not the restore/dependency
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
         working-directory: Henge
-        run: make test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
+        run: make test-mdns-proxy test-direct-contact test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample
 
       - name: Build and verify the macOS sample disk image
         working-directory: Henge
@@ -122,7 +127,6 @@ jobs:
       - name: Validate Swift, native renderer and display compatibility
         working-directory: Henge
         run: |
-          bash ios/scripts/check_display.sh
           xcrun --sdk macosx swiftc ios/Henge/PhysicalMouseButtons.swift tests/test_physical_mouse_buttons.swift -o build/test_physical_mouse_buttons
           build/test_physical_mouse_buttons
           xcrun --sdk macosx swiftc ios/Henge/AbsolutePenSample.swift tests/test_absolute_pen_sample.swift -o build/test_absolute_pen_sample

@@ -66,7 +66,7 @@ int main(void) {
     input_time_ns++;
     run_ep_in(x, 3); assert(x->pen_delivered == 2);
     deliver_pending(x);
-    assert(x->pen_delivered == 4 && received(0)[0] == 5 && u16(received(0) + 1) == 100);
+    assert(x->pen_delivered == 4 && received(0)[0] == (5 | HV_PEN_PRIMARY) && u16(received(0) + 1) == 100);
     assert(u16(received(0) + 5) == 1000 && (int16_t)u16(received(0) + 7) == -3000 && u16(received(0) + 11) == 12345);
     assert(u16(received(1) + 1) == 1500 && received(2)[0] == 4 && received(3)[0] == 0);
     assert(u16(received(2) + 5) == 0);
@@ -110,7 +110,7 @@ int main(void) {
             run_ep_in(x, 3);
             assert(x->pen_delivered == before + 1);
             const uint8_t *r = received(clicks_at + 4 * i + phase);
-            assert(r[0] == (phase == 1 ? 5 : phase == 3 ? 0 : 4));
+            assert(r[0] == (phase == 1 ? (5 | HV_PEN_PRIMARY) : phase == 3 ? 0 : 4));
             assert(u16(r + 1) == (unsigned)(1000 + i));
             run_ep_in(x, 3); assert(x->pen_delivered == before + 1);
         }

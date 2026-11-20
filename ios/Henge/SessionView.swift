@@ -75,6 +75,10 @@ struct SessionView: View {
         henge_vm_pointer_reset()
     }
 
+    private var hideGuestCursor: Bool {
+        touchMode == "direct" && touchInputActive && !display.isExternal && !pencilInRange && !HardwareMouse.shared.hasMouse
+    }
+
     var body: some View {
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
@@ -216,6 +220,9 @@ struct SessionView: View {
         .onReceive(NotificationCenter.default.publisher(for: TouchInputSafety.pencilPresence)) { note in
             pencilInRange = note.userInfo?["present"] as? Bool ?? false
         }
+        .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
+        .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
+        .onDisappear { henge_vm_set_cursor_hidden(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
@@ -567,14 +574,7 @@ struct SessionView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Touch Controls") {
-                    Picker("Mode", selection: $touchMode) {
-                        Text("Trackpad").tag("trackpad")
-                        Text("Direct Touch").tag("direct")
-                    }
-                    .pickerStyle(.segmented)
-                    Text(touchMode == "direct" ? TouchInputSafety.directDescription
-                         : "Swipe to move the pointer; tap to click, hold then move to drag. Pencil still points and draws directly on the Mac image. Touch and Pencil pause while a physical mouse is connected.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    TouchControlOptions(mode: $touchMode)
                 }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {
@@ -588,6 +588,17 @@ struct SessionView: View {
                     Slider(value: $scrollSpeed, in: 0.1...1.5)
                     Text("The Mac supplies a small pointer image. Enlarging it can look blurry; 1× is the sharpest on an iPad. Scroll speed changes apply immediately.")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
+                    NavigationLink("Network & Devices") {
+                        ConnectivityView(typeDiagnostics: {
+                            showDetails = false
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 600_000_000)
+                                await Keys.typeSlowly(Sharing.diagnosticsCommand)
+                            }
+                        })
+                    }
                 }
                 Section("Connected devices") {
                     LabeledContent("Keyboard", value: keyboardConnected ? "Connected through iPadOS" : "Not connected")

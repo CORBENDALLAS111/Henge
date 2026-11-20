@@ -5,7 +5,7 @@ import UIKit
 enum TouchInputSafety {
     static let reset = Notification.Name("henge.input.reset")
     static let pencilPresence = Notification.Name("henge.input.pencilPresence")
-    static let directDescription = "Experimental absolute touch: tap where to click, or hold and move to drag/select. Two fingers use Mac trackpad gestures. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
+    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, move to drag, or hold still for a right-click. Two fingers scroll. Pencil: tap to click, move to drag, or hold still then lift to double-click. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
 }
 
 struct DirectTouchSurface: UIViewRepresentable {
@@ -34,6 +34,8 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var lastPoint = CGPoint.zero
         private var pendingDown: DispatchWorkItem?
         private var contact = false
+        private var classifier = DirectContactGesture()
+        private let touchRing = CAShapeLayer()
         private var eraser = false
         private var lastHover: CGPoint?
         private var lastHoverTime: TimeInterval = 0
@@ -55,6 +57,11 @@ struct DirectTouchSurface: UIViewRepresentable {
             status.numberOfLines = 2
             status.isUserInteractionEnabled = false
             addSubview(status)
+            touchRing.fillColor = UIColor.white.withAlphaComponent(0.12).cgColor
+            touchRing.strokeColor = UIColor.white.withAlphaComponent(0.8).cgColor
+            touchRing.lineWidth = 1.5
+            touchRing.isHidden = true
+            layer.addSublayer(touchRing)
             let pencilInteraction = UIPencilInteraction()
             pencilInteraction.delegate = self
             addInteraction(pencilInteraction)
@@ -76,7 +83,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         }
         func setImageFrame(_ frame: CGRect?) {
             guard displayFrame != frame else { return }
-            if let old = displayFrame, let frame, old.size != frame.size { reset() }
+            if let old = displayFrame, let frame, old != frame { reset() }
             displayFrame = frame
             setNeedsLayout()
         }
@@ -96,6 +103,8 @@ struct DirectTouchSurface: UIViewRepresentable {
         func reset() {
             pendingDown?.cancel(); pendingDown = nil
             pendingLeave?.cancel(); pendingLeave = nil
+            classifier.reset()
+            showTouch(nil)
             proximity.reset()
             setPencilPresent(false)
             henge_vm_pen_cancel()
@@ -132,12 +141,12 @@ struct DirectTouchSurface: UIViewRepresentable {
             lastHover = nil
             setPencilPresent(false)
         }
-        private func pencil(_ touch: UITouch, down: Bool, correction: Bool = false) {
+        private func pencil(_ touch: UITouch, down: Bool, correction: Bool = false, at location: CGPoint? = nil) {
             if down && !correction {
                 proximity.recordSample(estimate: touch.estimationUpdateIndex?.intValue, timestamp: touch.timestamp)
             }
             lastHoverTime = ProcessInfo.processInfo.systemUptime
-            let point = touch.preciseLocation(in: self)
+            let point = location ?? touch.preciseLocation(in: self)
             lastHover = point
             var roll: CGFloat = 0
             if #available(iOS 17.5, *) { roll = touch.rollAngle }
@@ -145,11 +154,35 @@ struct DirectTouchSurface: UIViewRepresentable {
             send(point, pressure: down ? pressure : 0, altitude: touch.altitudeAngle,
                  azimuth: touch.azimuthAngle(in: self), roll: roll, flags: 4 | (down ? 1 : 0) | (eraser ? 8 : 0))
         }
-        private func pressFinger() {
-            pendingDown?.cancel(); pendingDown = nil
-            guard primary != nil, !multi, usable else { return }
-            contact = send(startPoint, pressure: 1, flags: 5)
-            if contact && lastPoint != startPoint { send(lastPoint, pressure: 1, flags: 5) }
+        private func showTouch(_ point: CGPoint?) {
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            touchRing.isHidden = point == nil
+            if let point {
+                touchRing.path = UIBezierPath(ovalIn: CGRect(x: point.x - 18, y: point.y - 18, width: 36, height: 36)).cgPath
+            }
+            CATransaction.commit()
+        }
+        private func perform(_ actions: [DirectContactGesture.Action], pencilTouch: UITouch? = nil) {
+            let range: Int32 = 4 | (pencilTouch != nil && eraser ? 8 : 0)
+            for action in actions {
+                switch action {
+                case .down(let p), .move(let p):
+                    if let pencilTouch {
+                        pencil(pencilTouch, down: true, at: p)
+                        contact = primary != nil
+                    } else { contact = send(p, pressure: 1, flags: 5) }
+                    if !contact { return }
+                case .up(let p):
+                    send(p, flags: range); contact = false
+                case .click(let p, let count, let secondary):
+                    // Each complete pair remains in the USB queue, including fast double-clicks.
+                    for _ in 0..<count {
+                        guard send(p, pressure: secondary ? 0 : 1, flags: range | (secondary ? 2 : 1)),
+                              send(p, flags: range) else { return }
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+            }
         }
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
             guard activeInput, !HardwareMouse.shared.hasMouse else { updateStatus(); return }
@@ -162,7 +195,9 @@ struct DirectTouchSurface: UIViewRepresentable {
                 pendingLeave?.cancel(); pendingLeave = nil
                 primary = pen
                 proximity.beginContact(); setPencilPresent(true)
-                pencil(pen, down: true); contact = primary != nil
+                startPoint = pen.preciseLocation(in: self)
+                classifier.begin(startPoint, tool: .pencil, time: pen.timestamp)
+                pencil(pen, down: false)
                 return
             }
             guard primary?.type != .pencil, !proximity.isHovering else { return } // palm rejection
@@ -179,16 +214,21 @@ struct DirectTouchSurface: UIViewRepresentable {
             if fingers.count >= 2 {
                 if !multi {
                     pendingDown?.cancel(); pendingDown = nil
-                    henge_vm_pen_cancel(); contact = false; primary = nil; multi = true
+                    henge_vm_pen_cancel(); classifier.reset(); showTouch(nil); contact = false; primary = nil; multi = true
                     gestures.touchesBegan(fingers, with: event)
                 } else { gestures.touchesBegan(direct, with: event) }
                 return
             }
             primary = first; startPoint = first.location(in: self); lastPoint = startPoint
+            classifier.begin(startPoint, tool: .finger, time: first.timestamp)
+            showTouch(startPoint)
             send(startPoint, flags: 4)
-            let work = DispatchWorkItem { [weak self] in self?.pressFinger() }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.primary != nil, !self.multi else { return }
+                self.perform(self.classifier.hold(time: ProcessInfo.processInfo.systemUptime))
+            }
             pendingDown = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + DirectContactGesture.contextDelay, execute: work)
         }
         override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
             guard activeInput, !HardwareMouse.shared.hasMouse else { reset(); return }
@@ -196,10 +236,13 @@ struct DirectTouchSurface: UIViewRepresentable {
             guard usable else { reset(); return }
             guard let primary, touches.contains(primary) else { return }
             if primary.type == .pencil {
-                for sample in event?.coalescedTouches(for: primary) ?? [primary] { pencil(sample, down: true) }
+                for sample in event?.coalescedTouches(for: primary) ?? [primary] {
+                    perform(classifier.move(sample.preciseLocation(in: self)), pencilTouch: sample)
+                }
             } else {
                 lastPoint = primary.location(in: self)
-                if contact { send(lastPoint, pressure: 1, flags: 5) }
+                showTouch(lastPoint)
+                perform(classifier.move(lastPoint))
             }
         }
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -212,6 +255,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             guard let t = primary, touches.contains(t) else { fingers.subtract(touches); return }
             if usable {
                 if t.type == .pencil {
+                    perform(classifier.end(t.preciseLocation(in: self), time: t.timestamp), pencilTouch: t)
                     pencil(t, down: false)
                     let token = proximity.endContact(), point = t.preciseLocation(in: self)
                     // UIKit resumes hover after tip-up. Keep the release in range,
@@ -225,14 +269,15 @@ struct DirectTouchSurface: UIViewRepresentable {
                 }
                 else {
                     lastPoint = t.location(in: self)
-                    if !contact { pressFinger() }
-                    if contact { send(lastPoint, pressure: 1, flags: 5); send(lastPoint, flags: 4) }
+                    perform(classifier.end(lastPoint, time: t.timestamp))
+                    showTouch(nil)
                 }
                 // Up must be delivered in range before proximity leave, since
                 // macOS does not dispatch pointer edges outside pen range.
                 if t.type != .pencil { send(t.location(in: self), flags: 0) }
             }
             pendingDown?.cancel(); pendingDown = nil
+            showTouch(nil)
             primary = nil; contact = false; fingers.subtract(touches)
             StickyKeys.shared.releaseAll()
         }

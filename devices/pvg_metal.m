@@ -174,6 +174,7 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
     uint32_t cursor_w, cursor_h, cursor_stride;
     int cursor_hot_x, cursor_hot_y;
     BOOL cursor_shown;
+    BOOL touch_cursor_hidden; /* screen_lock; host presentation only */
     int drawn_x, drawn_y, drawn_w, drawn_h; /* where it is on the frame now */
     double last_capture;
     /* A frame that came too soon after the last: shown shortly, for it may be the last for a long while. */
@@ -2560,7 +2561,7 @@ static NSString *const screen_shaders = @"#include <metal_stdlib>\n"
         CAMetalLayer *target = layer; // retained across nextDrawable and a concurrent disconnect
         uint64_t generation = layer_generation, requests = screen_requests;
         id<MTLTexture> tex = screen_tex, ctex = cursor_tex;
-        BOOL half = screen_half, shown = cursor_shown;
+        BOOL half = screen_half, shown = cursor_shown, hideCursor = touch_cursor_hidden;
         uint32_t W = screen_w, H = screen_h, cw0 = cursor_w, ch0 = cursor_h;
         int hx = cursor_hot_x, hy = cursor_hot_y;
         os_unfair_lock_unlock(&screen_lock);
@@ -2615,6 +2616,7 @@ static NSString *const screen_shaders = @"#include <metal_stdlib>\n"
         /* Something newer came during the wait? Then that is the frame to show. */
         os_unfair_lock_lock(&screen_lock);
         tex = screen_tex, half = screen_half, ctex = cursor_tex, shown = cursor_shown;
+        hideCursor = touch_cursor_hidden;
         cw0 = cursor_w, ch0 = cursor_h, hx = cursor_hot_x, hy = cursor_hot_y;
         BOOL same_target = layer_generation == generation && layer == target;
         BOOL same_size = screen_w == W && screen_h == H;
@@ -2647,7 +2649,7 @@ static NSString *const screen_shaders = @"#include <metal_stdlib>\n"
         [e drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
         const uint8_t *page = hv_pvg_lite_display_page(lite);
         uint32_t where = page ? __atomic_load_n((const uint32_t *)(page + 0xe00), __ATOMIC_ACQUIRE) : 0xffffffff;
-        if (ctex && where != 0xffffffff && (shown || page[0xe04])) {
+        if (!hideCursor && ctex && where != 0xffffffff && (shown || page[0xe04])) {
             const float scale = cursor_scale();
             float x = (float)(where & 0xffff) - hx * scale, y = (float)(where >> 16) - hy * scale;
             float cw = cw0 * scale, ch = ch0 * scale;
@@ -2946,6 +2948,18 @@ void hv_pvg_metal_set_layer(HvPvgMetal *m, void *layer) {
     dispatch_async(r->worker, ^{
         if (r->on_screen) [r present:r->on_screen];
     });
+}
+
+void hv_pvg_metal_set_cursor_hidden(HvPvgMetal *m, int hidden) {
+    if (!m) return;
+    HvReplay *r = (__bridge HvReplay *)m;
+    os_unfair_lock_lock(&r->screen_lock);
+    if (r->touch_cursor_hidden != (hidden != 0)) {
+        r->touch_cursor_hidden = hidden != 0;
+        r->screen_dirty = YES;
+        [r kickPresenter:YES];
+    }
+    os_unfair_lock_unlock(&r->screen_lock);
 }
 
 uint64_t hv_pvg_metal_gpu_frames(HvPvgMetal *m) {
