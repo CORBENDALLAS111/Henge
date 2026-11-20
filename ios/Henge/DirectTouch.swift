@@ -5,16 +5,17 @@ import UIKit
 enum TouchInputSafety {
     static let reset = Notification.Name("henge.input.reset")
     static let pencilPresence = Notification.Name("henge.input.pencilPresence")
-    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, move to drag, or hold still for a right-click. Two fingers scroll; a two-finger tap does not click. Pencil: tap to click, move to drag, or hold still then lift to double-click. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
+    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, move to drag, or hold still for a right-click. Two fingers scroll; a two-finger tap does not click. Optional one-finger scrolling: swipe to scroll, pause briefly then move to drag. Pencil: tap to click, move to drag, or hold still then lift to double-click. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
 }
 
 struct DirectTouchSurface: UIViewRepresentable {
     let isActive: Bool
     var directFingers = true
+    var oneFingerScrolling = false
     var imageFrame: CGRect? = nil
     func makeUIView(context: Context) -> Surface { Surface() }
     func updateUIView(_ view: Surface, context: Context) {
-        view.setActive(isActive, directFingers: directFingers)
+        view.setActive(isActive, directFingers: directFingers, oneFingerScrolling: oneFingerScrolling)
         view.setImageFrame(imageFrame)
     }
     static func dismantleUIView(_ view: Surface, coordinator: ()) { view.reset() }
@@ -22,6 +23,8 @@ struct DirectTouchSurface: UIViewRepresentable {
     final class Surface: UIView, UIPencilInteractionDelegate, UIPointerInteractionDelegate {
         private var activeInput = false
         private var directFingers = true
+        private var oneFingerScrolling = false
+        private var scroll = OneFingerScroll()
         private var proximity = PencilProximity()
         private var displayFrame: CGRect?
         private var imageBounds: CGRect { displayFrame ?? bounds }
@@ -90,9 +93,10 @@ struct DirectTouchSurface: UIViewRepresentable {
             setNeedsLayout()
         }
         private var usable: Bool { activeInput && !HardwareMouse.shared.hasMouse && henge_vm_pen_ready() != 0 }
-        func setActive(_ active: Bool, directFingers: Bool) {
-            if !active || self.directFingers != directFingers { reset() }
+        func setActive(_ active: Bool, directFingers: Bool, oneFingerScrolling: Bool) {
+            if !active || self.directFingers != directFingers || self.oneFingerScrolling != oneFingerScrolling { reset() }
             self.directFingers = directFingers
+            self.oneFingerScrolling = oneFingerScrolling
             gestures.allowsTouchscreenClicks = !directFingers
             activeInput = active
             isUserInteractionEnabled = active
@@ -107,6 +111,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             pendingDown?.cancel(); pendingDown = nil
             pendingLeave?.cancel(); pendingLeave = nil
             classifier.reset()
+            sendScroll(scroll.end(time: ProcessInfo.processInfo.systemUptime))
             showTouch(nil)
             proximity.reset()
             setPencilPresent(false)
@@ -166,6 +171,14 @@ struct DirectTouchSurface: UIViewRepresentable {
             }
             CATransaction.commit()
         }
+        private func sendScroll(_ events: [OneFingerScroll.Event]) {
+            for event in events {
+                switch event {
+                case .touch(let id, let phase, let x, let y, let time): henge_vm_touch(id, phase, x, y, time)
+                case .frame(let time): henge_vm_touch_frame(time)
+                }
+            }
+        }
         private func perform(_ actions: [DirectContactGesture.Action], pencilTouch: UITouch? = nil) {
             let range: Int32 = 4 | (pencilTouch != nil && eraser ? 8 : 0)
             for action in actions {
@@ -178,6 +191,11 @@ struct DirectTouchSurface: UIViewRepresentable {
                     if !contact { return }
                 case .up(let p):
                     send(p, flags: range); contact = false
+                case .scrollBegin(let p, let time):
+                    pendingDown?.cancel(); pendingDown = nil
+                    sendScroll(scroll.begin(p, size: bounds.size, time: time))
+                case .scroll(let p, let time): sendScroll(scroll.move(p, time: time))
+                case .scrollEnd(let time): sendScroll(scroll.end(time: time))
                 case .click(let p, let count, let secondary):
                     // Each complete pair remains in the USB queue, including fast double-clicks.
                     for _ in 0..<count {
@@ -231,13 +249,14 @@ struct DirectTouchSurface: UIViewRepresentable {
             if fingers.count >= 2 {
                 if !multi {
                     pendingDown?.cancel(); pendingDown = nil
+                    sendScroll(scroll.end(time: first.timestamp))
                     henge_vm_pen_cancel(); classifier.reset(); showTouch(nil); contact = false; primary = nil
                     beginMulti(fingers, event: event)
                 } else { beginMulti(direct, event: event) }
                 return
             }
             primary = first; startPoint = first.location(in: self); lastPoint = startPoint
-            classifier.begin(startPoint, tool: .finger, time: first.timestamp)
+            classifier.begin(startPoint, tool: .finger, time: first.timestamp, scrollFingerSwipes: oneFingerScrolling)
             showTouch(startPoint)
             send(startPoint, flags: 4)
             let work = DispatchWorkItem { [weak self] in
@@ -273,7 +292,9 @@ struct DirectTouchSurface: UIViewRepresentable {
             } else {
                 lastPoint = primary.location(in: self)
                 showTouch(lastPoint)
-                perform(classifier.move(lastPoint))
+                for sample in event?.coalescedTouches(for: primary) ?? [primary] {
+                    perform(classifier.move(sample.location(in: self), time: sample.timestamp))
+                }
             }
         }
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {

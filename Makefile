@@ -379,3 +379,9 @@ test-existing-account-profile: $(B)/test_existing_account_profile
 
 $(B)/test_desktop_hid: tests/test_desktop_hid.m devices/absolute_pen.h | $(B)
 	xcrun --sdk macosx clang -fobjc-arc -Idevices $< -framework Foundation -framework IOKit -framework ApplicationServices -o $@
+
+$(B)/test_one_finger_scroll: ios/Henge/OneFingerScroll.swift tests/test_one_finger_scroll.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-one-finger-scroll: $(B)/test_one_finger_scroll
+	$(B)/test_one_finger_scroll
+.PHONY: test-one-finger-scroll

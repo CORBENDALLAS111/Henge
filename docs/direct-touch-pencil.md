@@ -66,12 +66,42 @@ a port bitmask (the distinction matters when adding the third port).
   and readiness. Only a configured guest driver posting a full input transfer
   enables absolute input. There is no relative-pointer positioning fallback.
 
-The session's hiding control bar now shows **Touch** or **Trackpad** and offers
-both methods in a native picker. An absent saved preference defaults to Direct
-Touch; existing explicit choices remain selected. External displays keep
-trackpad control. Select Trackpad if the guest does not accept the new device or positioning is
-incorrect. External display mode continues to use the iOS screen as a trackpad;
-the app cannot directly touch an image shown only on the external display.
+The session's hiding control bar has a white icon-only control button. Each tap
+switches Direct Touch ↔ Trackpad immediately, with no menu. VoiceOver announces
+the selected mode and the next action. An absent saved preference defaults to
+Direct Touch; explicit saved choices remain selected. External displays keep
+trackpad control and disable this button.
+
+### Optional one-finger scrolling
+
+Enable **Settings or Details → Touch Controls → One-finger scrolling**. It
+starts off so the user's accepted drag behavior remains selected. With it on:
+
+- A quick swipe beyond the existing 10-point slop scrolls.
+- Pause at least 220 ms before moving to drag/select instead.
+- A stationary 550-ms hold still opens one context menu.
+- A tap or two quick taps still produces ordinary primary clicks.
+- Pencil pointing and dragging retain their original policy.
+
+A classified swipe becomes two virtual Magic Trackpad contacts (IDs 8/9), not
+mouse-wheel ticks. Both contacts move in one frame at each UIKit sample's own
+timestamp. The dominant axis locks to prevent sideways drift. macOS supplies
+acceleration, natural-scroll direction and momentum using its existing trackpad
+settings; this does not claim to duplicate the iPhone's exact deceleration curve.
+There is no additional host momentum generator to double the guest's inertia.
+Source points are bounded to the native sensor range. Cancellation, rotation,
+mode changes, backgrounding and transition to real multifinger input release
+both virtual contacts. Scroll actions never emit click/auto-keyboard requests.
+
+The native trackpad queue coalesces only repeated motion with matching finger
+IDs/contact states and physical-button state. Initial contact transitions remain
+ordered, with the newest move and its original timestamp retained. Even a full
+edge-filled queue retains the final stop/empty state instead of silently dropping
+finger-up reports. Controller tests cover a thousand queued moves and release
+under backpressure, alongside the existing stationary click regressions.
+
+Select Trackpad if the guest does not accept the absolute device or positioning
+is incorrect. On an external display the iOS screen remains a trackpad.
 
 ## Upgrade and diagnostics
 
@@ -118,9 +148,14 @@ edges, but reports a distinct skip when virtual-HID/event-tap permissions are
 unavailable. Such a skip is not a successful driver test, and even a pass on the
 runner is not Ventura/iPad acceptance.
 
+The user reported that taps, drag, long-press context menus and custom resolution
+work on their existing Ventura after installing b639ca575124. Apple Account/App
+Store downloads are still unconfirmed. One-finger scrolling and the revised
+icon-only button are new and still require that same on-device acceptance.
+
 **No iPad/Pencil Pro or running Ventura guest is attached to this environment.**
-Guest driver binding, absolute-position calibration, clicking, long presses,
-window/icon dragging, text selection, multi-finger scroll, zoom, rotation,
+Broader guest driver binding, absolute-position calibration, text selection,
+one/multi-finger scroll, zoom, rotation,
 Pencil hover/pressure/tilt/roll, double-tap/squeeze and switching to/from a physical
 mouse still need on-device verification. The new path remains experimental.
 

@@ -33,6 +33,7 @@ struct SessionView: View {
     @AppStorage("henge.matchScreenColors") private var matchScreenColors = true
     @AppStorage("henge.display.brightness") private var screenBrightness = 1.0
     @AppStorage("henge.touch.mode") private var touchMode = "direct"
+    @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = false
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -128,7 +129,7 @@ struct SessionView: View {
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
                     if !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct",
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling,
                                            imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
                             .frame(width: layout.touch.width, height: layout.touch.height)
                             .position(x: layout.touch.midX, y: layout.touch.midY)
@@ -258,6 +259,7 @@ struct SessionView: View {
         .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
+        .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
         .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in
@@ -484,27 +486,22 @@ struct SessionView: View {
             .font(.system(size: 15))
     }
 
-    /// The selected method stays visible in the session, including full screen.
+    /// One press switches method; VoiceOver names the current method and action.
     private var touchModeTool: some View {
-        Menu {
-            Picker("Control method", selection: $touchMode) {
-                Text("Direct Touch").tag("direct")
-                Text("Trackpad").tag("trackpad")
-            }
+        let direct = touchMode == "direct" && !display.isExternal
+        return Button {
+            touchMode = touchMode == "direct" ? "trackpad" : "direct"
         } label: {
-            VStack(spacing: 1) {
-                Image(systemName: touchMode == "direct" ? "hand.point.up.left" : "rectangle.and.hand.point.up.left")
-                    .font(.system(size: 16, weight: .medium))
-                Text(touchMode == "direct" ? "Touch" : "Trackpad").font(.caption2)
-            }
-            .foregroundStyle(Desk.accentLight)
-            .frame(width: 54, height: 44)
-            .contentShape(Rectangle())
+            Image(systemName: direct ? "hand.point.up.left" : "rectangle.and.hand.point.up.left")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("Control method")
-        .accessibilityValue(touchMode == "direct" ? "Direct Touch" : "Trackpad")
+        .accessibilityValue(direct ? "Direct Touch" : "Trackpad")
         .disabled(display.isExternal)
-        .accessibilityHint(display.isExternal ? "The external display uses trackpad control" : "Choose Direct Touch or Trackpad")
+        .accessibilityHint(display.isExternal ? "The external display uses trackpad control" : direct ? "Switch to Trackpad" : "Switch to Direct Touch")
     }
 
     /// The system's paste button: iOS asks no permission for it, as it would if the app read the clipboard itself.

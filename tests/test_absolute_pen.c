@@ -152,6 +152,42 @@ static void test_desktop_clicks(void) {
     pthread_mutex_destroy(&x->mu); free(x);
 }
 
+static void test_scroll_trackpad_queue(void) {
+    HvXhci *x=hv_xhci_create(NULL,NULL); assert(x);
+    hv_xhci_touch(x,8,0,3000,3000,1000);
+    hv_xhci_touch(x,9,0,3200,3000,1000);
+    assert(x->tp_rtail-x->tp_rhead==2);
+    for(int i=1;i<=1000;i++) {
+        hv_xhci_touch(x,8,1,3000,3000-i,1000+i*8);
+        hv_xhci_touch(x,9,1,3200,3000-i,1000+i*8);
+        hv_xhci_touch_frame(x,1000+i*8);
+    }
+    // Keep initial complete two-finger state and newest movement while stalled.
+    assert(x->tp_rtail-x->tp_rhead==3);
+    unsigned latest=(x->tp_rtail-1)%HV_TP_REPORTS;
+    assert(x->tp_rlen[latest]==30 && x->tp_reports[latest][1]==0);
+    assert((x->tp_reports[latest][20]&15)==8 && (x->tp_reports[latest][29]&15)==9);
+    assert(x->tp_fingers[0].y==2000 && x->tp_fingers[1].y==2000 && x->tp_ts==9000);
+    uint8_t first[HV_TP_REPORT_LEN]; memcpy(first,x->tp_reports[1],HV_TP_REPORT_LEN);
+    assert(!tp_same_contacts(first,30,x->tp_reports[0],21));
+    // Even an edge-filled queue must retain the final no-fingers state.
+    x->tp_rtail=x->tp_rhead+HV_TP_REPORTS;
+    hv_xhci_touch(x,8,2,0,0,9010);
+    hv_xhci_touch(x,9,2,0,0,9010);
+    assert(x->tp_rtail-x->tp_rhead<=HV_TP_REPORTS);
+    latest=(x->tp_rtail-1)%HV_TP_REPORTS;
+    assert(x->tp_rlen[latest]==12 && x->tp_reports[latest][7]==2 && !x->tp_reports[latest][1]);
+    for(int i=0;i<HV_TP_FINGERS;i++) assert(!x->tp_fingers[i].in);
+    // Finger identity, stop/contact state and physical button are hard edges.
+    uint8_t changed[HV_TP_REPORT_LEN]; memcpy(changed,first,sizeof changed);
+    changed[20]^=1; assert(!tp_same_contacts(first,30,changed,30));
+    memcpy(changed,first,sizeof changed); changed[15]^=0x20;
+    assert(!tp_same_contacts(first,30,changed,30));
+    memcpy(changed,first,sizeof changed); changed[1]=1;
+    assert(!tp_same_contacts(first,30,changed,30));
+    pthread_mutex_destroy(&x->mu); free(x);
+}
+
 int main(void) {
     HvXhci *x = hv_xhci_create(NULL, NULL); assert(x);
     assert(!hv_xhci_pen_ready(x) && hv_xhci_pen(x, 1, 1, 1, 0, 0, 0, 5) == -1);
@@ -262,6 +298,7 @@ int main(void) {
     pthread_mutex_destroy(&x->mu); free(x);
     test_stationary_clicks();
     test_desktop_clicks();
-    puts("PASS: independent USB mouse clicks at fixed XY, left double-click/right hold reports, hover-before-click, mouse cancellation/overflow, pen pressure/tilt, interrupt service and reset");
+    test_scroll_trackpad_queue();
+    puts("PASS: independent USB mouse clicks at fixed XY, left double-click/right hold reports, hover-before-click, mouse cancellation/overflow, pen pressure/tilt, synchronized scroll coalescing/final release, interrupt service and reset");
     return 0;
 }

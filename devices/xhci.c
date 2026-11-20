@@ -1342,6 +1342,17 @@ static uint32_t tp_now_ms(void) {
     return (uint32_t)((uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000);
 }
 
+/* Motion may be replaced only when contacts, states and physical button are
+   unchanged. Keep the first frame of a contact transition and its latest move. */
+static int tp_same_contacts(const uint8_t *a, unsigned an, const uint8_t *b, unsigned bn) {
+    if (an != bn || an < 12 || a[1] != b[1]) return 0;
+    for (unsigned at = 12; at + 9 <= an; at += 9) {
+        if ((a[at + 3] >> 5) != (b[at + 3] >> 5) ||
+            (a[at + 8] & 15) != (b[at + 8] & 15)) return 0;
+    }
+    return 1;
+}
+
 /* Queue the current state as a report, stamped with the touch sample's clock (ms);
    ts_ms 0 falls back to the current time (the physical button). */
 static void tp_queue(HvXhci *x, uint32_t ts_ms) {
@@ -1351,12 +1362,23 @@ static void tp_queue(HvXhci *x, uint32_t ts_ms) {
     uint32_t now = ts_ms ? ts_ms : tp_now_ms();
     x->tp_ts = now > x->tp_ts ? now : x->tp_ts + 1;
     int len = tp_build_report(x, r);
-    if (x->tp_rtail - x->tp_rhead < HV_TP_REPORTS) {
-        unsigned at = x->tp_rtail % HV_TP_REPORTS;
-        memcpy(x->tp_reports[at], r, (size_t)len);
-        x->tp_rlen[at] = (uint8_t)len;
-        x->tp_rtail++;
+    uint32_t count = x->tp_rtail - x->tp_rhead;
+    if (count >= 2) {
+        unsigned last = (x->tp_rtail - 1) % HV_TP_REPORTS;
+        unsigned before = (x->tp_rtail - 2) % HV_TP_REPORTS;
+        if (tp_same_contacts(r, (unsigned)len, x->tp_reports[last], x->tp_rlen[last]) &&
+            tp_same_contacts(x->tp_reports[last], x->tp_rlen[last], x->tp_reports[before], x->tp_rlen[before])) {
+            memcpy(x->tp_reports[last], r, (size_t)len);
+            x->tp_rlen[last] = (uint8_t)len;
+            return;
+        }
     }
+    // Always retain the newest complete state, especially stop/empty reports.
+    // A stalled guest must not leave fingers down because its queue filled.
+    if (count == HV_TP_REPORTS) x->tp_rhead++;
+    unsigned at = x->tp_rtail++ % HV_TP_REPORTS;
+    memcpy(x->tp_reports[at], r, (size_t)len);
+    x->tp_rlen[at] = (uint8_t)len;
 }
 
 static struct HvTpFinger *tp_new_finger(HvXhci *x) {
