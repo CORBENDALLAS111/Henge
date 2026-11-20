@@ -27,11 +27,11 @@ struct KeyboardTapRequest {
     let began: TimeInterval
     enum Decision: Equatable { case wait, discard, apply(CGPoint, open: Bool) }
     func resolve(now: TimeInterval, inputActive: Bool, penIdle: Bool, mode: String,
-                 keyboardVisible: Bool, focusStatus: Int32, focusAge: Double) -> Decision {
+                 keyboardVisible: Bool, focusStatus: Int32, focusAge: Double, focusBounds: CGRect) -> Decision {
         let elapsed = now - began
         guard inputActive, elapsed >= 0, elapsed <= 2, point.x.isFinite, point.y.isFinite else { return .discard }
         guard elapsed >= 0.18, penIdle else { return .wait }
-        let open = mode == "tap" || (mode == "text" && focusStatus == 1 && focusAge >= 0 && focusAge < elapsed - 0.15)
+        let open = mode == "tap" || (mode == "text" && focusStatus == 1 && !focusBounds.isEmpty && focusBounds.contains(point) && focusAge >= 0 && focusAge < elapsed - 0.15)
         if open || keyboardVisible || (mode != "tap" && mode != "text") { return .apply(point, open: open) }
         return .wait
     }

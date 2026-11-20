@@ -22,7 +22,7 @@ import CoreGraphics
         precondition(invalid.minY.isFinite && invalid.size==base.size)
         let target=CGPoint(x:0.5,y:0.9), request=KeyboardTapRequest(point:CGPoint(x:0.5,y:0.9),began:10)
         func decision(_ time: Double, idle: Bool, mode: String="tap", visible: Bool=false, status: Int32=1, age: Double=0) -> KeyboardTapRequest.Decision {
-            request.resolve(now:time,inputActive:true,penIdle:idle,mode:mode,keyboardVisible:visible,focusStatus:status,focusAge:age)
+            request.resolve(now:time,inputActive:true,penIdle:idle,mode:mode,keyboardVisible:visible,focusStatus:status,focusAge:age,focusBounds:CGRect(x:0.4,y:0.8,width:0.2,height:0.2))
         }
         precondition(decision(10.2,idle:false) == .wait, "keyboard must not cancel queued clicks")
         precondition(decision(10.2,idle:false,visible:true) == .wait, "an already open keyboard cannot remap a pending click")
@@ -32,7 +32,9 @@ import CoreGraphics
         precondition(decision(10.4,idle:true,mode:"text",age:0.05) == .apply(target,open:true))
         precondition(decision(10.4,idle:true,mode:"text",status:-1) == .wait, "missing accessibility cannot claim an editable field")
         precondition(decision(12.1,idle:true) == .discard)
-        precondition(request.resolve(now:10.3,inputActive:false,penIdle:true,mode:"tap",keyboardVisible:false,focusStatus:1,focusAge:0) == .discard)
+        precondition(request.resolve(now:10.3,inputActive:false,penIdle:true,mode:"tap",keyboardVisible:false,focusStatus:1,focusAge:0,focusBounds:.zero) == .discard)
+        precondition(request.resolve(now:10.4,inputActive:true,penIdle:true,mode:"text",keyboardVisible:false,focusStatus:1,focusAge:0,focusBounds:CGRect(x:0,y:0,width:0.2,height:0.2)) == .wait, "focus in another field cannot turn a button tap into keyboard opening")
+        precondition(request.resolve(now:10.4,inputActive:true,penIdle:true,mode:"text",keyboardVisible:false,focusStatus:1,focusAge:0,focusBounds:.zero) == .wait, "unknown field geometry cannot claim a text-field tap")
         print("PASS: keyboard preserves image scale, reveals tapped field, bounds vertical pan and handles invalid geometry")
     }
 }

@@ -400,7 +400,8 @@ struct SessionView: View {
                 let request = KeyboardTapRequest(point: point, began: tapped)
                 switch request.resolve(now: ProcessInfo.processInfo.systemUptime, inputActive: touchInputActive,
                                        penIdle: henge_vm_pen_idle() != 0, mode: keyboardMode,
-                                       keyboardVisible: typing, focusStatus: focused, focusAge: age) {
+                                       keyboardVisible: typing, focusStatus: focused, focusAge: age,
+                                       focusBounds: CGRect(x: CGFloat(rect[0]), y: CGFloat(rect[1]), width: CGFloat(rect[2]), height: CGFloat(rect[3]))) {
                 case .wait: break
                 case .discard: keyboardTapAt = nil; keyboardTapPoint = nil
                 case .apply(let target, let open):
