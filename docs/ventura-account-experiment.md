@@ -45,9 +45,10 @@ python3 tools/audit_ventura_kernel.py /tmp/ventura-dec/kernelcache.release.vma2.
 ## Behavior and boundaries
 
 Install macOS → Ventura 13.6 → **Apple Account compatibility (experimental)**.
-The switch defaults off and is available only while creating a new VM. Existing
-VMs, their ECID/seed, disk, auxiliary storage, account state and settings are not
-migrated or regenerated. Keep the previous Ventura VM until testing succeeds.
+The switch defaults off. Existing Macs now have an opt-in retrofit experiment in
+Mac settings → Apple Account & App Store; see [current setup](apple-account-setup.md).
+Changing that setting leaves ECID/seed, disk and auxiliary storage untouched.
+Actual sign-in on an existing Ventura guest remains unverified.
 A new profile stays with its VM on export/import; importing an already-listed
 profile is refused. Ordinary VMs clear all profile environment fields at boot.
 

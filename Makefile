@@ -369,3 +369,10 @@ test-keyboard-input: $(B)/test_keyboard_viewport $(B)/test_input_focus
 	$(B)/test_keyboard_viewport
 	$(B)/test_input_focus
 .PHONY: test-keyboard-input
+
+# Atomic account-profile changes for an already installed Mac, no guest needed.
+$(B)/test_existing_account_profile: ios/Henge/SoftwareIdentity.swift ios/Henge/ExistingAccountProfile.swift tests/test_existing_account_profile.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-existing-account-profile: $(B)/test_existing_account_profile
+	$(B)/test_existing_account_profile
+.PHONY: test-existing-account-profile

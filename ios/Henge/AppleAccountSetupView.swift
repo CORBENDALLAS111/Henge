@@ -1,23 +1,53 @@
 import SwiftUI
 
 struct AppleAccountSetupView: View {
+    var macID: UUID? = nil
     var identityPresent: Bool? = nil
     var nativeStatus: Int32? = nil
     @ObservedObject private var installer = Installer.shared
+    @ObservedObject private var machines = Machines.shared
     @State private var canStart = false
+    @State private var profileError: String?
+
+    private var currentMac: VirtualMac? { machines.all.first { $0.id == macID } }
+    private var profilePresent: Bool? { currentMac.map { $0.activeSoftwareIdentity != nil } ?? identityPresent }
+    private var savedSession: Bool { currentMac.map { ExistingAccountProfile.hasSavedSession(in: $0.directory) } ?? false }
 
     var body: some View {
         Form {
-            if let identityPresent {
+            if let identityPresent = profilePresent {
                 Section("This Mac") {
                     LabeledContent("Account compatibility", value: AppleAccountSupport.status(identityPresent: identityPresent, nativeStatus: nativeStatus))
                     Text(identityPresent
                          ? "Sign in through System Settings in macOS, then open App Store and sign in there too. An active compatibility profile does not confirm that Apple accepted the sign-in."
-                         : "This Mac was created without the account compatibility profile. Updating Henge does not add it to an existing installation.")
+                         : "You can try account compatibility on this installed Mac without reinstalling macOS. Updating Henge alone does not enable the experiment.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            Section("Set up Apple Account") {
+            if let mac = currentMac {
+                Section("Use this installed Mac") {
+                    Button(mac.activeSoftwareIdentity == nil ? "Enable compatibility on this Mac" : "Disable compatibility on this Mac") {
+                        do {
+                            try machines.setAccountCompatibility(for: mac.id, enabled: mac.activeSoftwareIdentity == nil)
+                        } catch { profileError = error.localizedDescription }
+                    }
+                    .disabled(!canStart || installer.busy || machines.importing != nil || machines.exporting != nil || savedSession)
+                    Text("Changes apply at the next cold boot. Your installed system, apps and files stay on the same disk. The profile is saved once and reused; disabling it restores the previous virtual hardware identifiers, but does not undo changes macOS or cloud services made while it was enabled.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if savedSession {
+                        Text("Start this Mac and choose Shut Down from the Apple menu first. Its saved memory session will not be deleted to enable this feature.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else if !canStart {
+                        Text("Shut down the running Mac before changing its account profile.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Text("For Ventura, the measured profile is for 13.6, build 22G120. Open About This Mac inside macOS to check your version. Other Ventura builds are not verified. A profile match does not confirm that Apple accepts account sign-in or fixes MID.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Text("After enabling, start this Mac, check Details for Compatibility active, then try signing in through macOS System Settings and App Store. If it fails, shut down and disable compatibility here. You do not need to install another macOS to try this path.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            Section("Set up another Mac") {
                 Button("Prepare macOS Sequoia 15.6.1") { AppleAccountSupport.requestSetup() }
                     .disabled(!canStart || installer.busy)
                 Text("Opens Install with the recommended system and Apple Account compatibility selected. Review the space and memory settings, then start the installation. Your current Mac stays in the Macs list.")
@@ -26,7 +56,7 @@ struct AppleAccountSetupView: View {
                     Text("Shut down the running Mac before preparing another installation.")
                         .foregroundStyle(.secondary)
                 }
-                Text("The profile is created before macOS is installed and stays with that Mac. An existing Mac needs a new installation for this setup. Replacing only a serial number is not a confirmed MID repair.")
+                Text("This creates a separate Mac with its profile selected before installation. Existing Macs can use the experiment above. Replacing only a serial number is not a confirmed MID repair.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Supported systems") {
@@ -45,6 +75,9 @@ struct AppleAccountSetupView: View {
         .background(Desk.page)
         .navigationTitle("Apple Account & App Store")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Account profile could not be changed", isPresented: Binding(get: { profileError != nil }, set: { if !$0 { profileError = nil } })) {
+            Button("OK", role: .cancel) { profileError = nil }
+        } message: { Text(profileError ?? "") }
         .task {
             while !Task.isCancelled {
                 canStart = henge_vm_can_start() != 0

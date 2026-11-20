@@ -60,9 +60,9 @@ struct MacSettingsView: View {
 
                 DeskHeading("Apple Account")
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(AppleAccountSupport.status(identityPresent: mac.softwareIdentity != nil, nativeStatus: nil))
+                    Text(AppleAccountSupport.status(identityPresent: mac.activeSoftwareIdentity != nil, nativeStatus: nil))
                     NavigationLink("Apple Account & App Store") {
-                        AppleAccountSetupView(identityPresent: mac.softwareIdentity != nil)
+                        AppleAccountSetupView(macID: mac.id)
                     }
                     Text("Set up a compatible Mac or check what this Mac needs for account sign-in.")
                         .font(.footnote).foregroundStyle(Desk.dim)
@@ -182,6 +182,9 @@ struct MacSettingsView: View {
         .background(Desk.page)
         .navigationTitle(mac.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if let current = machines.all.first(where: { $0.id == mac.id }) { mac = current }
+        }
         .onDisappear(perform: save)
         .fileMover(isPresented: $movingExport, file: machines.lastExport) { result in
             switch result {

@@ -711,9 +711,9 @@ struct SessionView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Apple Account") {
-                    Text(AppleAccountSupport.status(identityPresent: mac.softwareIdentity != nil, nativeStatus: softwareIdentityStatus))
+                    Text(AppleAccountSupport.status(identityPresent: mac.activeSoftwareIdentity != nil, nativeStatus: softwareIdentityStatus))
                     NavigationLink("Apple Account & App Store") {
-                        AppleAccountSetupView(identityPresent: mac.softwareIdentity != nil, nativeStatus: softwareIdentityStatus)
+                        AppleAccountSetupView(macID: mac.id, identityPresent: mac.activeSoftwareIdentity != nil, nativeStatus: softwareIdentityStatus)
                     }
                     Text("Sign in inside macOS. Compatibility status describes the emulator setup; it does not confirm account authentication.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -762,6 +762,14 @@ struct SessionView: View {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         guard !Task.isCancelled else { return }
+        do {
+            let resolved = try mac.resolvingAccountProfile()
+            guard resolved.softwareIdentity == mac.softwareIdentity,
+                  resolved.accountCompatibilityDisabled == mac.accountCompatibilityDisabled else {
+                error = "This Mac's account profile changed. Close this session and open the Mac again."
+                return
+            }
+        } catch { self.error = error.localizedDescription; return }
         UIApplication.shared.isIdleTimerDisabled = true
         HardwareMouse.shared.start()
         let ram = GuestMemory.prepare(mac)
@@ -774,7 +782,7 @@ struct SessionView: View {
         JITBootstrap.releaseLingeringDebugger()
         Sharing.prepare()
         EngineTuning.apply()
-        guard SoftwareIdentity.prepare(mac.softwareIdentity) else {
+        guard SoftwareIdentity.prepare(mac.activeSoftwareIdentity) else {
             error = "This Mac's software identity is invalid."
             return
         }

@@ -14,6 +14,7 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     var osName: String?
     var lastUsed: Date?
     var softwareIdentity: SoftwareIdentity?
+    var accountCompatibilityDisabled: Bool?
     /// The size macOS is told its screen is. Macs made before this was a choice have none: 16:9.
     var screenWidth: Int?
     var screenHeight: Int?
@@ -32,6 +33,18 @@ struct VirtualMac: Identifiable, Codable, Hashable {
     var aspect: CGFloat { CGFloat(screen.width) / CGFloat(screen.height) }
 
     var directory: URL { Machines.directory(for: id) }
+    var activeSoftwareIdentity: SoftwareIdentity? { accountCompatibilityDisabled == true ? nil : softwareIdentity }
+
+    /// A single atomic sidecar is authoritative after changing an existing Mac.
+    /// It also recovers the setting if machines.json was not saved before exit.
+    func resolvingAccountProfile() throws -> VirtualMac {
+        guard let profile = try ExistingAccountProfile.read(in: directory, machineID: id, ecid: ecid, seed: seed) else { return self }
+        var mac = self
+        mac.softwareIdentity = profile.identity
+        mac.accountCompatibilityDisabled = !profile.enabled
+        return mac
+    }
+
     var rom: URL { directory.appendingPathComponent("AVPBooter.vmapple2.bin") }
     var disk: URL { directory.appendingPathComponent("disk.img") }
     var aux: URL { directory.appendingPathComponent("auxiliary.bin") }
@@ -63,6 +76,7 @@ private struct MachineFile: Codable {
     var seed: UInt64?
     var ramMB: Int?
     var softwareIdentity: SoftwareIdentity?
+    var accountCompatibilityDisabled: Bool?
 }
 
 @MainActor
@@ -130,6 +144,9 @@ final class Machines: ObservableObject {
                                      ramMB: info.ramMB ?? Device.suggestedRAMGB * 1024, diskBytes: 64 << 30)
                 guard info.softwareIdentity?.isValid != false else { continue }
                 mac.softwareIdentity = info.softwareIdentity
+                mac.accountCompatibilityDisabled = info.accountCompatibilityDisabled
+                do { mac = try mac.resolvingAccountProfile() }
+                catch { lastError = error.localizedDescription; continue }
                 let os = (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 mac.osName = os.isEmpty ? nil : os
                 (mac.screenWidth, mac.screenHeight) = Device.fittingScreen
@@ -187,6 +204,7 @@ final class Machines: ObservableObject {
             var mac = VirtualMac(name: info.name ?? folder.lastPathComponent, ecid: info.ecid, seed: info.seed ?? 0,
                                  ramMB: info.ramMB ?? 2048, diskBytes: 0)
             mac.softwareIdentity = info.softwareIdentity
+            mac.accountCompatibilityDisabled = info.accountCompatibilityDisabled
             importing = mac.name
             unpacked = 0
             let dest = mac.directory
@@ -246,7 +264,8 @@ final class Machines: ObservableObject {
         }
     }
 
-    private func writeExport(_ mac: VirtualMac) async throws -> URL {
+    private func writeExport(_ sourceMac: VirtualMac) async throws -> URL {
+        let mac = try sourceMac.resolvingAccountProfile()
         let fm = FileManager.default
         let exports = Self.inbox.appendingPathComponent("Exports", isDirectory: true)
         let safeName = mac.name.replacingOccurrences(of: "/", with: "-")
@@ -267,6 +286,7 @@ final class Machines: ObservableObject {
             try fm.copyItem(at: mac.aux, to: partial.appendingPathComponent("auxiliary.bin"))
             var info: [String: Any] = ["name": mac.name, "ecid": mac.ecid, "seed": mac.seed, "ramMB": mac.ramMB]
             if let identity = mac.softwareIdentity { info["softwareIdentity"] = identity.manifest }
+            if let disabled = mac.accountCompatibilityDisabled { info["accountCompatibilityDisabled"] = disabled }
             try JSONSerialization.data(withJSONObject: info).write(to: partial.appendingPathComponent("machine.json"))
             let source = mac.disk.path, target = partial.appendingPathComponent(Self.packedDisk).path
             let ok = await Task.detached { () -> Bool in
@@ -294,8 +314,21 @@ final class Machines: ObservableObject {
 
     func update(_ mac: VirtualMac) {
         guard let i = all.firstIndex(where: { $0.id == mac.id }) else { return }
-        all[i] = mac
+        do { all[i] = try mac.resolvingAccountProfile() }
+        catch { lastError = error.localizedDescription; return }
         save()
+    }
+
+    /// The disk, auxiliary storage, ECID and seed are never rewritten here.
+    func setAccountCompatibility(for id: UUID, enabled: Bool) throws {
+        guard let i = all.firstIndex(where: { $0.id == id }) else { throw message("This Mac is no longer listed.") }
+        let mac = try all[i].resolvingAccountProfile()
+        _ = try ExistingAccountProfile.setEnabled(enabled, in: mac.directory, machineID: mac.id,
+            ecid: mac.ecid, seed: mac.seed, identity: mac.softwareIdentity,
+            canChange: henge_vm_can_start() != 0 && !Installer.shared.busy
+                && importing == nil && exporting == nil)
+        all[i] = try mac.resolvingAccountProfile()
+        save() // the atomic profile is already durable even if this list write fails
     }
 
     func delete(_ id: UUID) {
@@ -326,7 +359,10 @@ final class Machines: ObservableObject {
             HengeLog.log("machines", "machines.json (\(data.count) bytes) could not be read")
             return
         }
-        all = list.filter { FileManager.default.fileExists(atPath: $0.disk.path) }
+        all = list.filter { FileManager.default.fileExists(atPath: $0.disk.path) }.map { mac in
+            do { return try mac.resolvingAccountProfile() }
+            catch { lastError = error.localizedDescription; return mac } // boot also validates, failing closed
+        }
     }
 
     private func save() {
