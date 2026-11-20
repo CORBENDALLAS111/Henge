@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Desktop gesture classification in view points, before any guest button-down.
 /// A held Pencil produces a double-click only on lift, so it can still become a drag.
