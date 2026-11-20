@@ -38,7 +38,7 @@ a port bitmask (the distinction matters when adding the third port).
   (4 bytes). A mouse-only report cannot simultaneously send a tablet-hover
   button=0 event. The shared queue sends absolute hover before button-down,
   allows at least 16 ms for positioning, and preserves button edges for 50 ms.
-  No relative displacement is used for steering. Cancellation and overflow
+  Trackpad tap clicks use the same mouse reports without changing the pointer position. No relative displacement is used for steering. Cancellation and overflow
   release both mouse and pen at the last delivered position.
   A clean shutdown/cold boot is required to enumerate the revised descriptor.
   The preceding digitizer-only approach still failed the user's stationary

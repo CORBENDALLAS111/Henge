@@ -1188,7 +1188,7 @@ int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y,
     int result = 0;
     if (desktop) {
         unsigned buttons = desktop & HV_PEN_DESKTOP_UP ? 0 : desktop & HV_PEN_DESKTOP_RIGHT ? 2 : 1;
-        if (buttons) {
+        if (buttons && !(flags & HV_PEN_DESKTOP_AT_CURSOR)) {
             /* Position in hover first. Do not send a digitizer contact as well:
                this click belongs exclusively to the standard Mouse collection. */
             hv_pen_report(sample, px, py, 0, tilt_x, tilt_y, twist, flags & (HV_PEN_RANGE | HV_PEN_INVERT));

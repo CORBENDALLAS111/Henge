@@ -117,6 +117,16 @@ static void test_desktop_clicks(void) {
     uint8_t get_mouse[] = {0xa1,1,HV_PEN_MOUSE_REPORT_ID,1,0,0,32,0};
     assert(control(x,3,get_pen,out,sizeof out)==HV_PEN_REPORT_LEN && out[0]==HV_PEN_REPORT_ID);
     assert(control(x,3,get_mouse,out,sizeof out)==HV_PEN_MOUSE_REPORT_LEN && out[0]==HV_PEN_MOUSE_REPORT_ID && out[1]==0);
+    // Trackpad clicks must not move the pointer to the call's unused XY.
+    unsigned cursor_at=(unsigned)x->pen_delivered;
+    assert(!hv_xhci_pen(x,0,0,0,0,0,0,4|HV_PEN_DESKTOP_LEFT|HV_PEN_DESKTOP_AT_CURSOR));
+    assert(!hv_xhci_pen(x,0,0,0,0,0,0,4|HV_PEN_DESKTOP_UP));
+    deliver_pending(x);
+    assert(x->pen_delivered==cursor_at+2);
+    const uint8_t *cursor_down=guest+0x4000+16*cursor_at;
+    const uint8_t *cursor_up=guest+0x4000+16*(cursor_at+1);
+    assert(cursor_down[0]==HV_PEN_MOUSE_REPORT_ID && cursor_down[1]==1);
+    assert(cursor_up[0]==HV_PEN_MOUSE_REPORT_ID && cursor_up[1]==0);
     // Cancel after an actual delivered down, before any future target can move.
     assert(!hv_xhci_pen(x,2000,3000,0,0,0,0,4|HV_PEN_DESKTOP_LEFT));
     for(int ms=0;ms<100 && !x->pen_mouse_delivered;ms++) {input_time_ns+=1000000;run_ep_in(x,3);}
