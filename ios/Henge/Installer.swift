@@ -13,7 +13,7 @@ struct MacOSRelease: Identifiable, Hashable {
     var macBytes: Int64 = 24 << 30
 
     /// Exact restore build with a measured kernel profile; sign-in is unverified.
-    var supportsSoftwareCompatibility: Bool { id == "22G120" }
+    var supportsSoftwareCompatibility: Bool { AppleAccountSupport.supports(build: id) }
 
     /// The builds offered, oldest first. Apple's catalog (mesu.apple.com) only lists the newest;
     /// these are the same images from Apple's CDN, and Apple still signs them for virtual Macs.
@@ -114,7 +114,7 @@ final class Installer: NSObject, ObservableObject {
     func start(_ release: MacOSRelease, name: String, ramMB: Int, cpus: Int, keepImage: Bool, softwareCompatibility: Bool = false) {
         guard !busy else { return }
         guard !softwareCompatibility || release.supportsSoftwareCompatibility else {
-            phase = .failed("Experimental Apple Account mode is available only for Ventura 13.6 (22G120).")
+            phase = .failed("Apple Account compatibility is unavailable for this macOS restore build.")
             return
         }
         phase = .checking

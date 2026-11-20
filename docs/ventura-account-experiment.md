@@ -1,5 +1,8 @@
 # Ventura Apple Account experiment
 
+This document records the earlier Ventura-only work. For the current newer-system
+profiles and setup flow, see [Apple Account setup](apple-account-setup.md).
+
 **Sign-in, two-factor authentication and App Store downloads are unverified.**
 This is an experimental port, not an Apple-supported VM identity implementation.
 It does not create an Apple Account. No credentials, tokens, private hardware

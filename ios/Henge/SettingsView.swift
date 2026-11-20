@@ -108,6 +108,10 @@ struct SettingsView: View {
                     NavigationLink("Network & Devices") { ConnectivityView() }
                 }
                 .listRowBackground(Desk.card)
+                Section {
+                    NavigationLink("Apple Account & App Store") { AppleAccountSetupView() }
+                }
+                .listRowBackground(Desk.card)
                 Section("Performance") {
                     Picker("Mac refresh rate", selection: $refreshRate) {
                         Text("30 Hz").tag(30)

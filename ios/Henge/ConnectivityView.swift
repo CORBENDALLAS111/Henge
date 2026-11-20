@@ -46,8 +46,9 @@ struct ConnectivityView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Apple Account") {
+                NavigationLink("Apple Account & App Store") { AppleAccountSetupView() }
                 Text("Sign in inside macOS System Settings. Henge never asks for your password or verification code.")
-                Text("The Ventura compatibility option is experimental and is chosen when creating a new Mac. A matching compatibility profile does not confirm that Apple accepted the sign-in. An “MID is invalid” error needs guest diagnostics; changing a serial number alone is not a verified fix.")
+                Text("Apple Account compatibility is experimental and is chosen when creating a new Mac. Sequoia 15.6.1 is recommended. A matching compatibility profile does not confirm that Apple accepted the sign-in. An “MID is invalid” error needs guest diagnostics; changing a serial number alone is not a verified fix.")
                     .font(.footnote).foregroundStyle(.secondary)
                 if let typeDiagnostics {
                     Button("Type Diagnostic Command", action: typeDiagnostics)

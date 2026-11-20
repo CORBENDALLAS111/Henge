@@ -352,3 +352,10 @@ $(B)/test_mdns_proxy: tests/test_mdns_proxy.c host/dns_proxy.c host/dns_proxy.h 
 test-mdns-proxy: $(B)/test_mdns_proxy
 	$(B)/test_mdns_proxy
 .PHONY: test-mdns-proxy
+
+$(B)/test_apple_account_support: ios/Henge/AppleAccountSupport.swift tests/test_apple_account_support.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+
+test-apple-account-support: $(B)/test_apple_account_support
+	$(B)/test_apple_account_support
+.PHONY: test-apple-account-support

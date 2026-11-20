@@ -251,6 +251,7 @@ int henge_vm_software_identity_status(void) {
     HvMachine *m=hv_vm_machine();
     int board_ready=!m->compat_boot || __atomic_load_n(&m->compat_boot_done,__ATOMIC_ACQUIRE)==2;
     int status=m->compat_match ? (board_ready && __atomic_load_n(&m->compat_pc,__ATOMIC_ACQUIRE)?2:1) : 0;
+    if (m->compat_match && m->compat_boot && __atomic_load_n(&m->compat_boot_done,__ATOMIC_ACQUIRE)==3) status=-1;
     pthread_rwlock_unlock(&api_lock);
     return status;
 }

@@ -58,6 +58,18 @@ struct MacSettingsView: View {
                 .padding(.vertical, 10)
                 .deskCard()
 
+                DeskHeading("Apple Account")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(AppleAccountSupport.status(identityPresent: mac.softwareIdentity != nil, nativeStatus: nil))
+                    NavigationLink("Apple Account & App Store") {
+                        AppleAccountSetupView(identityPresent: mac.softwareIdentity != nil)
+                    }
+                    Text("Set up a compatible Mac or check what this Mac needs for account sign-in.")
+                        .font(.footnote).foregroundStyle(Desk.dim)
+                }
+                .padding(17)
+                .deskCard()
+
                 DeskHeading("About This Mac")
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle(isOn: Binding(get: { mac.reportHostIdentity ?? false }, set: {
