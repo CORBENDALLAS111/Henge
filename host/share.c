@@ -9,6 +9,7 @@
 
    Locks are accepted but not enforced: macOS only writes to a server that offers them, and there is one client. */
 #include "share.h"
+#include "input_focus.h"
 
 #include <copyfile.h>
 #include <dirent.h>
@@ -45,6 +46,28 @@ static char *device_clip; /* the device's, for the guest */
 static unsigned long device_seq;
 static char *guest_clip; /* the guest's, until the device takes it */
 static time_t agent_seen;
+static int focus_enabled;
+static HvInputFocus guest_focus;
+static double focus_seen;
+static double focus_now(void) {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
+    return ts.tv_sec + ts.tv_nsec/1e9;
+}
+void hv_share_set_focus_enabled(int enabled) {
+    pthread_mutex_lock(&clip_mu);
+    if (focus_enabled != !!enabled) { focus_seen=0; memset(&guest_focus,0,sizeof guest_focus); }
+    focus_enabled=!!enabled;
+    pthread_mutex_unlock(&clip_mu);
+}
+int hv_share_focus(double bounds[4], double *age) {
+    pthread_mutex_lock(&clip_mu);
+    double elapsed=focus_seen ? focus_now()-focus_seen : 1000;
+    int status=focus_enabled && elapsed>=0 && elapsed<2 ? guest_focus.editable : -2;
+    if (bounds) { bounds[0]=guest_focus.x; bounds[1]=guest_focus.y; bounds[2]=guest_focus.width; bounds[3]=guest_focus.height; }
+    if (age) *age=elapsed;
+    pthread_mutex_unlock(&clip_mu);
+    return status;
+}
 
 void hv_share_set_clipboard(const char *text) {
     pthread_mutex_lock(&clip_mu);
@@ -709,6 +732,22 @@ static int clipboard_put(Conn *c, Request *r) {
 
 static int serve_henge(Conn *c, Request *r) {
     const char *what = r->path + strlen("/.henge/");
+    if (!strcmp(what,"input-settings") && !strcmp(r->method,"GET")) {
+        if (body_discard(c,r)!=0) return -1;
+        pthread_mutex_lock(&clip_mu); int enabled=focus_enabled; pthread_mutex_unlock(&clip_mu);
+        const char *body=enabled ? "enabled=1\n" : "enabled=0\n";
+        return respond(c,r,200,"OK","Content-Type: text/plain\r\n",body,strlen(body));
+    }
+    if (!strcmp(what,"focus") && !strcmp(r->method,"PUT")) {
+        size_t length=0; char *body=body_small(c,r,&length); if(!body) return -1;
+        HvInputFocus focus; int valid=hv_input_focus_parse(body,length,&focus); free(body);
+        if(!valid) return respond_empty(c,r,400,"Bad Request");
+        pthread_mutex_lock(&clip_mu);
+        int enabled=focus_enabled;
+        if(enabled) { guest_focus=focus; focus_seen=focus_now(); }
+        pthread_mutex_unlock(&clip_mu);
+        return respond_empty(c,r,enabled?204:403,enabled?"No Content":"Forbidden");
+    }
     if (!strcmp(what, "install") && !strcmp(r->method, "GET")) {
         if (body_discard(c, r) != 0) return -1;
         return respond(c, r, 200, "OK", "Content-Type: text/plain\r\n", install_script, sizeof install_script - 1);

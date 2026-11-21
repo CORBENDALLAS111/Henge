@@ -1,0 +1,41 @@
+[
+  {
+    "sha256": "333e6c7e8a8082f9a2cc6ce021a5664e6cdc2b5eac2f34b822886c844a6b91f8",
+    "version": "Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:18 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_VMAPPLE",
+    "versionDelta": "0x138e9c3",
+    "procComm": "0x5cc",
+    "fullNameOffset": "0x5dd",
+    "handler": "0xfffffe00083d2d20",
+    "handlerUnique": true,
+    "nativeMatcherAccepted": true,
+    "keyVerified": true,
+    "profileVerified": true,
+    "restoreBuild": "24G90"
+  },
+  {
+    "sha256": "268f431e7366409dc798cd8f719a93cf3a30c6f828201d8eeceae889358099c6",
+    "version": "Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE",
+    "versionDelta": "0x325715f",
+    "procComm": "0x5cc",
+    "fullNameOffset": "0x5dd",
+    "handler": "0xfffffe000a29b0d4",
+    "handlerUnique": true,
+    "nativeMatcherAccepted": true,
+    "keyVerified": true,
+    "profileVerified": true,
+    "restoreBuild": "25G83"
+  },
+  {
+    "sha256": "01332067965f721b7e6984348510b717ff346d253d7639212dcd9f6c6161afaf",
+    "version": "Darwin Kernel Version 27.2.0: Wed Oct 14 23:44:09 PDT 2026; root:xnu-13432.41.4~25/RELEASE_ARM64_VMAPPLE",
+    "versionDelta": "0x354895f",
+    "procComm": "0x5bc",
+    "fullNameOffset": "0x5cd",
+    "handler": "0xfffffe000a58961c",
+    "handlerUnique": true,
+    "nativeMatcherAccepted": true,
+    "keyVerified": true,
+    "profileVerified": true,
+    "restoreBuild": "26B123"
+  }
+]

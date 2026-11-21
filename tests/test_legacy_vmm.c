@@ -68,13 +68,27 @@ int main(void) {
     memset(proc,0,sizeof proc);
     memcpy(proc+0x5b8,"akd",4);memcpy(proc+0x5b8+17,"akd",4);
     check("Ventura measured layout selects account service",hv_legacy_vmm_process_at(proc,sizeof proc,0x5b8,&name),1);
-    check("Sequoia layout is rejected",hv_legacy_vmm_process_at(proc,sizeof proc,0x5cc,&name),0);
+    check("incorrect offset does not read Ventura fields",hv_legacy_vmm_process_at(proc,sizeof proc,0x5cc,&name),0);
     check("unknown layout is rejected",hv_legacy_vmm_process_at(proc,sizeof proc,0x5b9,&name),0);
     check("uninitialized profile is rejected",hv_legacy_vmm_process_at(proc,sizeof proc,0,&name),0);
     check("overflowing offset is rejected",hv_legacy_vmm_process_at(proc,sizeof proc,(size_t)-1,&name),0);
     check("truncated Ventura fields rejected",hv_legacy_vmm_process_at(proc,0x5b8+49,0x5b8,&name),0);
     memset(proc+0x5b8+17,0,33);memcpy(proc+0x5b8+17,"adid",5);
     check("inconsistent Ventura names rejected",hv_legacy_vmm_process_at(proc,sizeof proc,0x5b8,&name),0);
+    const size_t layouts[]={0x5b8,0x5cc,0x5bc};
+    uint8_t fields[HV_LEGACY_MAX_PROC_COMM+17+33];
+    const char *targets[]={"akd","adid","accountsd","storeaccountd","appstoreagent","identityservicesd","cloudd","TrustedPeersHelper"};
+    for(unsigned l=0;l<sizeof layouts/sizeof *layouts;l++) {
+        for(unsigned i=0;i<sizeof targets/sizeof *targets;i++) {
+            memset(fields,0,sizeof fields);size_t n=strlen(targets[i]);
+            memcpy(fields+layouts[l],targets[i],n<16?n:16);
+            memcpy(fields+layouts[l]+17,targets[i],n+1);
+            check("supported layout resolves the account process",hv_legacy_vmm_process_at(fields,sizeof fields,layouts[l],&name),1);
+            check("truncated layout is rejected",hv_legacy_vmm_process_at(fields,layouts[l]+49,layouts[l],&name),0);
+            fields[layouts[l]+17]='!';
+            check("mismatched adjacent names are rejected",hv_legacy_vmm_process_at(fields,sizeof fields,layouts[l],&name),0);
+        }
+    }
     printf("legacy VMM: %d checks, %d failures\n",checks,failures);
     return failures?1:0;
 }

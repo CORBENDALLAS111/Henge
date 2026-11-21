@@ -15,7 +15,7 @@ typedef struct HvVmConfig {
     const char *disk, *aux;   /* the root disk image and the auxiliary storage */
     uint64_t aux_offset;      /* where the aux image's data starts (16 KB) */
     uint64_t ecid, seed;      /* the machine identity the disk was installed with */
-    const char *mlb;          /* synthetic board identity, experimental new VMs only */
+    const char *mlb;          /* synthetic board identity, opt-in account compatibility */
     const uint8_t *mac_address; /* stable six bytes, shared by config and NIC */
     int legacy_identity;      /* opt-in, exact-kernel compatibility */
     uint64_t ram_mb;
@@ -103,6 +103,7 @@ void hv_vm_key_hid(uint8_t usage, int down); /* HID keyboard usage, which is wha
 void hv_vm_mouse_move(int dx, int dy);
 void hv_vm_pointer_reset(void); /* discard queued pointer input and release buttons */
 int hv_vm_pen_ready(void);
+int hv_vm_pen_idle(void);
 int hv_vm_gamepad_ready(void);
 int hv_vm_gamepad(unsigned buttons, int hat, const int axes[6]);
 void hv_vm_gamepad_cancel(void);

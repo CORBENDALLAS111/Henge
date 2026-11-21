@@ -43,3 +43,24 @@ Interpretation:
 - If neither appears, investigate source surface content/format, guest command
   layout and synchronization with the affected session's mapping/GPU errors.
   The screenshots alone cannot distinguish those possibilities.
+
+## Recovery of failed cached resources
+
+The replay cached a nil result for function and serialized-pipeline objects as
+though it were a successful immutable resource. Later uses with the same guest
+entry returned that nil indefinitely. The replay now retries failed resources
+with exponential delay (50 ms to a 4-second maximum), while keeping successful
+objects cached. A changed guest entry bypasses the old failure's cooldown, and
+recursive access to an object still being built returns unresolved rather than
+recursing without bound. Recovery is logged as `resource-recovered` with task/ref/type and failure count,
+capped at 32 messages per replay. Magenta clears and skipped draws remain visible in
+metadata; no color or pixel is suppressed.
+
+The native replay regression substitutes availability of a shader, not the cache:
+it first fails a pipeline through the real object table/cache, then supplies a
+real Metal function and checks that the same refs build a real pipeline after
+expiry. It also checks no immediate retry storm and retained successful objects.
+The portable retry-delay test passes under ASan/UBSan. Native Metal validation
+and final packaging of this follow-up are pending while GitHub Actions is disabled.
+This repairs a confirmed failure-cache bug; whether it explains the reported Codex
+rectangles still needs the affected session's ordinary `henge.log`.

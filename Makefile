@@ -50,7 +50,7 @@ RESTORE_OBJ = $(patsubst third_party/%.c,$(RB)/%.o,$(IRECV_SRC) $(MUXD_SRC) $(ID
 # The helper that runs inside macOS on a virtual Mac (share.c serves it to the guest).
 $(B)/henge-agent: tools/henge-agent.m
 	@mkdir -p $(B)
-	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit $< -o $@
+	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit -framework ApplicationServices $< -o $@
 	codesign -f -s - $@
 
 # Compressed in the app: tools that sign an IPA would try to sign a bare Mach-O too.
@@ -103,7 +103,7 @@ test-vm-lifecycle: $(B)/test_vm_lifecycle
 $(B)/test_pvg_lifecycle: tests/test_pvg_lifecycle.m $(ENGINE) $(DEV)
 	$(CC) $(CFLAGS) -fobjc-arc $^ $(METAL_LIBS) -o $@
 
-$(B)/test_pvg_surfaces: tests/test_pvg_surfaces.m devices/pvg_metal.m devices/pvg_colorprobe.h $(B)/metallib.o | $(B)
+$(B)/test_pvg_surfaces: tests/test_pvg_surfaces.m devices/pvg_metal.m devices/pvg_colorprobe.h devices/pvg_retry.h $(B)/metallib.o | $(B)
 	$(CC) $(CFLAGS) -fobjc-arc -Wno-unused-parameter -Wno-deprecated-declarations tests/test_pvg_surfaces.m $(B)/metallib.o $(METAL_LIBS) -o $@
 
 test-pvg-surfaces: $(B)/test_pvg_surfaces
@@ -338,7 +338,7 @@ test-gamepad-sample: $(B)/test_gamepad_sample
 .PHONY: test-gamepad-sample
 
 # Gesture policy is independent of UIKit and a running guest.
-$(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift tests/test_direct_contact_gesture.swift | $(B)
+$(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift ios/Henge/DirectMultiTouchGate.swift tests/test_direct_contact_gesture.swift | $(B)
 	xcrun --sdk macosx swiftc $^ -o $@
 
 test-direct-contact: $(B)/test_direct_contact_gesture
@@ -352,3 +352,48 @@ $(B)/test_mdns_proxy: tests/test_mdns_proxy.c host/dns_proxy.c host/dns_proxy.h 
 test-mdns-proxy: $(B)/test_mdns_proxy
 	$(B)/test_mdns_proxy
 .PHONY: test-mdns-proxy
+
+$(B)/test_apple_account_support: ios/Henge/AppleAccountSupport.swift tests/test_apple_account_support.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+
+test-apple-account-support: $(B)/test_apple_account_support
+	$(B)/test_apple_account_support
+.PHONY: test-apple-account-support
+
+# Keyboard viewport is independent of UIKit; guest focus is a metadata-only HTTP channel.
+$(B)/test_keyboard_viewport: ios/Henge/KeyboardViewport.swift tests/test_keyboard_viewport.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+$(B)/test_input_focus: tests/test_input_focus.c host/share.c host/share.h host/input_focus.h | $(B)
+	$(CC) $(CFLAGS) -pthread tests/test_input_focus.c host/share.c -o $@
+test-keyboard-input: $(B)/test_keyboard_viewport $(B)/test_input_focus
+	$(B)/test_keyboard_viewport
+	$(B)/test_input_focus
+.PHONY: test-keyboard-input
+
+# Atomic account-profile changes for an already installed Mac, no guest needed.
+$(B)/test_existing_account_profile: ios/Henge/SoftwareIdentity.swift ios/Henge/ExistingAccountProfile.swift tests/test_existing_account_profile.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-existing-account-profile: $(B)/test_existing_account_profile
+	$(B)/test_existing_account_profile
+.PHONY: test-existing-account-profile
+
+$(B)/test_desktop_hid: tests/test_desktop_hid.m devices/absolute_pen.h | $(B)
+	xcrun --sdk macosx clang -fobjc-arc -Idevices $< -framework Foundation -framework IOKit -framework ApplicationServices -o $@
+
+$(B)/test_one_finger_scroll: ios/Henge/OneFingerScroll.swift tests/test_one_finger_scroll.swift | $(B)
+	xcrun --sdk macosx swiftc -swift-version 5 $^ -o $@
+test-one-finger-scroll: $(B)/test_one_finger_scroll
+	$(B)/test_one_finger_scroll
+.PHONY: test-one-finger-scroll
+
+$(B)/test_guest_resolution: ios/Henge/GuestResolution.swift tests/test_guest_resolution.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-guest-resolution: $(B)/test_guest_resolution
+	$(B)/test_guest_resolution
+.PHONY: test-guest-resolution
+
+$(B)/test_pvg_retry: tests/test_pvg_retry.c devices/pvg_retry.h | $(B)
+	$(CC) $(CFLAGS) -Idevices $< -o $@
+test-pvg-retry: $(B)/test_pvg_retry
+	$(B)/test_pvg_retry
+.PHONY: test-pvg-retry

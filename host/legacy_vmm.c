@@ -33,7 +33,16 @@ typedef struct {
 static const LegacyKernel kernels[]={
     {"macOS Ventura 13.6 (22G120)",
      "Darwin Kernel Version 22.6.0: Fri Sep 15 13:39:33 PDT 2023; root:xnu-8796.141.3.700.8~1/RELEASE_ARM64_VMAPPLE",
-     0x10a69cf,0x5b8}
+     0x10a69cf,0x5b8},
+    {"macOS 15.6.1 (24G90)",
+     "Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:18 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_VMAPPLE",
+     0x138e9c3,0x5cc},
+    {"macOS 26.6.2 (25G83)",
+     "Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE",
+     0x325715f,0x5cc},
+    {"macOS 27.2 (26B123)",
+     "Darwin Kernel Version 27.2.0: Wed Oct 14 23:44:09 PDT 2026; root:xnu-13432.41.4~25/RELEASE_ARM64_VMAPPLE",
+     0x354895f,0x5bc}
 };
 
 static const LegacyKernel *verified_kernel(HvCpu *c,uint64_t va) {
@@ -54,12 +63,14 @@ static void legacy_apply(HvCpu *c) {
        flags, memory and SYSCTL_OUT behavior, including kernel callers. */
     unsigned result=(c->nzcv&(1u<<30))==0;
     uint64_t proc=0;
-    uint8_t fields[HV_LEGACY_PROC_COMM+17+33];
+    uint8_t fields[HV_LEGACY_MAX_PROC_COMM+17+33];
     size_t comm=__atomic_load_n(&c->m->compat_proc_comm,__ATOMIC_ACQUIRE);
     const char *name=NULL;
+    if (!comm || comm>HV_LEGACY_MAX_PROC_COMM) { c->x[8]=result; return; }
+    size_t span=comm+17+33;
     if (c->el==1 && read_kernel(c,c->x[19],&proc,sizeof proc) && proc &&
-        read_kernel(c,proc,fields,sizeof fields)) {
-        if(hv_legacy_vmm_process_at(fields,sizeof fields,comm,&name)) result=0;
+        read_kernel(c,proc,fields,span)) {
+        if(hv_legacy_vmm_process_at(fields,span,comm,&name)) result=0;
         if (name) {
             const char *caller = name;
             pthread_mutex_lock(&scope_lock);

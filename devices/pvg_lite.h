@@ -17,9 +17,12 @@ void hv_pvg_lite_destroy(HvPvgLite *p);
 void hv_pvg_lite_poll(HvPvgLite *p);
 /* The newest frame, BGRA, width * 4 bytes per row, if drawing has produced one. Returns 0 if so. */
 int hv_pvg_lite_frame(HvPvgLite *p, const uint8_t **pixels, uint32_t *width, uint32_t *height);
+/* Actual guest scanout dimensions, without copying/readback of pixel data. */
+int hv_pvg_lite_scanout_size(HvPvgLite *p, uint32_t *width, uint32_t *height);
 
 /* Between the device and its Metal side (pvg_metal.m). */
 typedef struct HvPvgMetal HvPvgMetal;
+int hv_pvg_metal_scanout_size(HvPvgMetal *m, uint32_t *width, uint32_t *height);
 HvPvgMetal *hv_pvg_metal_create(HvPvgLite *lite);
 void hv_pvg_metal_destroy(HvPvgMetal *m);
 void hv_pvg_metal_submit(HvPvgMetal *m, HvPvgLite *lite, uint32_t channel, uint32_t *command, uint32_t length);

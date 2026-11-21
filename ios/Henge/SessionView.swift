@@ -18,6 +18,7 @@ struct SessionView: View {
     @State private var cpusOn: Int32 = 0
     @State private var userCode = false
     @State private var softwareIdentityStatus: Int32 = 0
+    @State private var actualDisplayPixels: String?
     @State private var pencilInRange = false
     @State private var audioOutput = AudioOutputPicker.routeDescription
     @State private var keyboardConnected = GCKeyboard.coalesced != nil
@@ -32,12 +33,21 @@ struct SessionView: View {
     @AppStorage("henge.cpus") private var cpus = 4
     @AppStorage("henge.matchScreenColors") private var matchScreenColors = true
     @AppStorage("henge.display.brightness") private var screenBrightness = 1.0
-    @AppStorage("henge.touch.mode") private var touchMode = "trackpad"
+    @AppStorage("henge.touch.mode") private var touchMode = "direct"
+    @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = false
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
 
     @State private var typing = false
+    @AppStorage(SessionKeyboard.modeKey) private var keyboardMode = "manual"
+    @AppStorage(SessionKeyboard.keepSizeKey) private var keepKeyboardSize = true
+    @State private var keyboardRect = CGRect.zero
+    @State private var keyboardFocus = CGPoint(x: 0.5, y: 0.5)
+    @State private var keyboardPan: CGFloat = 0
+    @State private var keyboardPanStart: CGFloat?
+    @State private var keyboardTapAt: TimeInterval?
+    @State private var keyboardTapPoint: CGPoint?
     @State private var zoomed = false
     @State private var showDetails = false
     @State private var showFiles = false
@@ -85,7 +95,9 @@ struct SessionView: View {
             let full = CGSize(width: geo.size.width + insets.leading + insets.trailing,
                               height: geo.size.height + insets.top + insets.bottom)
             let landscape = full.width > full.height
-            let layout = Layout(full: full, insets: insets, landscape: landscape, zoomed: zoomed, typing: typing, centre: zoomCentre, aspect: mac.aspect)
+            let layout = Layout(full: full, insets: insets, landscape: landscape, zoomed: zoomed, typing: typing && !keepKeyboardSize, centre: zoomCentre, aspect: mac.aspect,
+                                keyboard: typing && keepKeyboardSize && !display.isExternal ? keyboardRect : .zero,
+                                focus: keyboardFocus, pan: keyboardPan)
             ZStack(alignment: .topLeading) {
                 (landscape || zoomed ? Color.black : Desk.page)
                 // One view in every layout: it holds the layer the engine draws into.
@@ -118,7 +130,7 @@ struct SessionView: View {
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
                     if !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct",
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling,
                                            imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
                             .frame(width: layout.touch.width, height: layout.touch.height)
                             .position(x: layout.touch.midX, y: layout.touch.midY)
@@ -176,8 +188,21 @@ struct SessionView: View {
                         .position(x: layout.touch.midX, y: layout.fillsPhone ? layout.touch.midY : layout.pad.midY)
                 }
                 if let error { errorCard(error, layout) }
+                if typing && keepKeyboardSize && !keyboardRect.isEmpty && !display.isExternal {
+                    Label("Move Mac view", systemImage: "arrow.up.and.down")
+                        .font(.body).padding(.horizontal).frame(height: 44)
+                        .background(Desk.raised, in: Capsule())
+                        .position(x: full.width / 2, y: max(keyboardRect.minY - 24, 24))
+                        .gesture(DragGesture(minimumDistance: 4).onChanged { value in
+                            if keyboardPanStart == nil { keyboardPanStart = keyboardPan }
+                            keyboardPan = (keyboardPanStart ?? 0) + value.translation.height
+                        }.onEnded { _ in keyboardPanStart = nil })
+                        .accessibilityLabel("Move Mac view vertically")
+                        .accessibilityAdjustableAction { direction in keyboardPan += direction == .increment ? 32 : -32 }
+                }
                 KeyboardCatcher(active: $typing).frame(width: 0, height: 0)
             }
+            .background(KeyboardFrameReader { keyboardRect = $0 })
             .onDrop(of: FileTransfers.dropTypes, isTargeted: $fileDropTargeted) { providers in
                 resetPointerInput()
                 let accepted = fileTransfers.accept(providers)
@@ -220,11 +245,22 @@ struct SessionView: View {
         .onReceive(NotificationCenter.default.publisher(for: TouchInputSafety.pencilPresence)) { note in
             pencilInRange = note.userInfo?["present"] as? Bool ?? false
         }
+        .ignoresSafeArea(.keyboard)
+        .onReceive(NotificationCenter.default.publisher(for: SessionKeyboard.directTap)) { note in
+            guard touchInputActive, !display.isExternal,
+                  let x = note.userInfo?["x"] as? Double, let y = note.userInfo?["y"] as? Double else { return }
+            keyboardTapPoint = CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            keyboardTapAt = ProcessInfo.processInfo.systemUptime
+        }
+        .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil; keyboardTapPoint = nil } }
+        .onChange(of: keyboardMode == "text" && touchInputActive, initial: true) { _, enabled in henge_share_set_focus_enabled(enabled ? 1 : 0) }
+        .task(id: keyboardMode) { await followKeyboardFocus() }
         .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
         .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
-        .onDisappear { henge_vm_set_cursor_hidden(0) }
+        .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
+        .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
         .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in
@@ -290,8 +326,8 @@ struct SessionView: View {
 
     /// Where everything goes, in points from the device's top left corner.
     private struct Layout {
-        let screen: CGRect
-        let touch: CGRect     // what is a trackpad besides the pad itself
+        var screen: CGRect
+        var touch: CGRect     // what is a trackpad besides the pad itself
         let fillsPhone: Bool
         let toolsY: CGFloat
         let pad: CGRect
@@ -302,7 +338,7 @@ struct SessionView: View {
             CGSize(width: min(touch.width / max(screen.width, 1), 1), height: min(touch.height / max(screen.height, 1), 1))
         }
 
-        init(full: CGSize, insets: EdgeInsets, landscape: Bool, zoomed: Bool, typing: Bool, centre: CGPoint, aspect: CGFloat) {
+        init(full: CGSize, insets: EdgeInsets, landscape: Bool, zoomed: Bool, typing: Bool, centre: CGPoint, aspect: CGFloat, keyboard: CGRect = .zero, focus: CGPoint = CGPoint(x: 0.5, y: 0.5), pan: CGFloat = 0) {
             self.insets = insets
             let big = full.height >= 600 // an iPad on its side, or a window on one
             if zoomed {
@@ -352,6 +388,32 @@ struct SessionView: View {
                 let bottom = full.height - insets.bottom - (typing ? 8 : 0)
                 pad = CGRect(x: 8, y: top, width: width, height: max(bottom - top, 60))
             }
+            if !keyboard.isEmpty {
+                screen = KeyboardViewport.frame(screen, keyboard: keyboard, focus: focus, pan: pan)
+                touch = CGRect(origin: .zero, size: full)
+            }
+        }
+    }
+
+    @MainActor private func followKeyboardFocus() async {
+        while !Task.isCancelled {
+            if let tapped = keyboardTapAt, let point = keyboardTapPoint {
+                var rect = [Double](repeating: 0, count: 4), age = 0.0
+                let focused = rect.withUnsafeMutableBufferPointer { henge_share_focus($0.baseAddress, &age) }
+                let request = KeyboardTapRequest(point: point, began: tapped)
+                switch request.resolve(now: ProcessInfo.processInfo.systemUptime, inputActive: touchInputActive,
+                                       penIdle: henge_vm_pen_idle() != 0, mode: keyboardMode,
+                                       keyboardVisible: typing, focusStatus: focused, focusAge: age,
+                                       focusBounds: CGRect(x: CGFloat(rect[0]), y: CGFloat(rect[1]), width: CGFloat(rect[2]), height: CGFloat(rect[3]))) {
+                case .wait: break
+                case .discard: keyboardTapAt = nil; keyboardTapPoint = nil
+                case .apply(let target, let open):
+                    keyboardFocus = target; keyboardPan = 0
+                    if open { typing = true }
+                    keyboardTapAt = nil; keyboardTapPoint = nil
+                }
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
@@ -364,11 +426,13 @@ struct SessionView: View {
                 Spacer()
                 tool("keyboard", "Keyboard") { typing = true }
                 Spacer()
+                touchModeTool
+                Spacer()
                 pasteTool
                 Spacer()
                 tool("plus.magnifyingglass", "Zoom in") { zoomed = true }
                 Spacer()
-                if layout.pad.width >= 390 {
+                if layout.pad.width >= 440 {
                     tool("folder", "Shared Files") { showFiles = true }
                     Spacer()
                 }
@@ -423,6 +487,24 @@ struct SessionView: View {
             .font(.system(size: 15))
     }
 
+    /// One press switches method; VoiceOver names the current method and action.
+    private var touchModeTool: some View {
+        let direct = touchMode == "direct" && !display.isExternal
+        return Button {
+            touchMode = touchMode == "direct" ? "trackpad" : "direct"
+        } label: {
+            Image(systemName: direct ? "hand.point.up.left" : "rectangle.and.hand.point.up.left")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Control method")
+        .accessibilityValue(direct ? "Direct Touch" : "Trackpad")
+        .disabled(display.isExternal)
+        .accessibilityHint(display.isExternal ? "The external display uses trackpad control" : direct ? "Switch to Trackpad" : "Switch to Direct Touch")
+    }
+
     /// The system's paste button: iOS asks no permission for it, as it would if the app read the clipboard itself.
     private var pasteTool: some View {
         PasteButton(payloadType: String.self) { texts in
@@ -462,8 +544,9 @@ struct SessionView: View {
         let pill = HStack(spacing: 4) {
             tool("eye.slash", "Hide controls", tint: .white) { hideControls() }
             tool("keyboard", "Keyboard", tint: .white) { typing.toggle() }
-            pasteTool
-            if layout.touch.width >= 360 { tool("folder", "Shared Files", tint: .white) { showFiles = true } }
+            touchModeTool
+            if layout.touch.width >= 360 { pasteTool }
+            if layout.touch.width >= 440 { tool("folder", "Shared Files", tint: .white) { showFiles = true } }
             tool(zoomed ? "minus.magnifyingglass" : "plus.magnifyingglass", zoomed ? "Zoom out" : "Zoom in", tint: zoomed ? Desk.accentLight : .white) { zoomed.toggle() }
             tool("info.circle", "Details", tint: .white) { showDetails = true }
             Rectangle().fill(Color.white.opacity(0.3)).frame(width: 1, height: 22).padding(.horizontal, 4)
@@ -567,6 +650,10 @@ struct SessionView: View {
                     LabeledContent("Up", value: "\(Int(Date().timeIntervalSince(started))) s")
                 }
                 Section("Display") {
+                    LabeledContent("Selected resolution", value: "\(mac.screen.width) × \(mac.screen.height)")
+                    LabeledContent("Mac display pixels", value: actualDisplayPixels ?? "Waiting for the desktop")
+                    Text("Sizes are physical pixels. Retina mode can show a smaller ‘Looks like’ size in macOS. Resolution changes require shutting down macOS and starting it again.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Toggle("Color matching", isOn: $matchScreenColors)
                     LabeledContent("Brightness", value: "\(Int(screenBrightness * 100))%")
                     Slider(value: $screenBrightness, in: 0.4...1)
@@ -576,6 +663,7 @@ struct SessionView: View {
                 Section("Touch Controls") {
                     TouchControlOptions(mode: $touchMode)
                 }
+                Section("Keyboard") { KeyboardOptions() }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {
                         Text("1×").tag(1)
@@ -650,15 +738,13 @@ struct SessionView: View {
                     Text("Less drawing for the emulated CPUs: window and Dock animations, desktop widgets, the screen saver and a moving wallpaper go. Open Terminal on the Mac, tap the button and press Return, then log out and back in. Also turn on Reduce Motion and Reduce Transparency in the Mac's System Settings, Accessibility. Undo puts it back, apart from the wallpaper. Needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                if mac.softwareIdentity != nil {
-                    Section("Apple Account experiment") {
-                        Text(softwareIdentityStatus == 2
-                             ? "Ventura compatibility matched. Account sign-in is not verified."
-                             : userCode ? "Compatibility has not matched this guest. Requires Ventura 13.6 (22G120)."
-                             : "Waiting for Ventura to start.")
-                        Text("This Mac uses its own software identity. Sign in manually in macOS. Instant Resume is unavailable.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                Section("Apple Account") {
+                    Text(AppleAccountSupport.status(identityPresent: mac.activeSoftwareIdentity != nil, nativeStatus: softwareIdentityStatus))
+                    NavigationLink("Apple Account & App Store") {
+                        AppleAccountSetupView(macID: mac.id, identityPresent: mac.activeSoftwareIdentity != nil, nativeStatus: softwareIdentityStatus)
                     }
+                    Text("Sign in inside macOS. Compatibility status describes the emulator setup; it does not confirm account authentication.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Log") {
                     VStack(alignment: .leading, spacing: 1) {
@@ -690,6 +776,7 @@ struct SessionView: View {
         state = 0
         userCode = false
         softwareIdentityStatus = 0
+        actualDisplayPixels = nil
         cpusOn = 0
         blocksPerSecond = 0
         framesOut = 0
@@ -704,6 +791,14 @@ struct SessionView: View {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         guard !Task.isCancelled else { return }
+        do {
+            let resolved = try mac.resolvingAccountProfile()
+            guard resolved.softwareIdentity == mac.softwareIdentity,
+                  resolved.accountCompatibilityDisabled == mac.accountCompatibilityDisabled else {
+                error = "This Mac's account profile changed. Close this session and open the Mac again."
+                return
+            }
+        } catch { self.error = error.localizedDescription; return }
         UIApplication.shared.isIdleTimerDisabled = true
         HardwareMouse.shared.start()
         let ram = GuestMemory.prepare(mac)
@@ -716,7 +811,7 @@ struct SessionView: View {
         JITBootstrap.releaseLingeringDebugger()
         Sharing.prepare()
         EngineTuning.apply()
-        guard SoftwareIdentity.prepare(mac.softwareIdentity) else {
+        guard SoftwareIdentity.prepare(mac.activeSoftwareIdentity) else {
             error = "This Mac's software identity is invalid."
             return
         }
@@ -758,9 +853,7 @@ struct SessionView: View {
         }
         bootRAM = ram
         started = Date()
-        var used = mac
-        used.lastUsed = started
-        Machines.shared.update(used)
+        Machines.shared.markUsed(mac.id, at: started)
         var lastBlocks = henge_vm_blocks()
         var lastTime = Date()
         var lastGPUFrames = henge_vm_gpu_frames()
@@ -774,6 +867,11 @@ struct SessionView: View {
             cpusOn = henge_vm_cpus_on()
             userCode = userCode || henge_vm_guest_el0() != 0
             softwareIdentityStatus = henge_vm_software_identity_status()
+            var pixelWidth: UInt32 = 0, pixelHeight: UInt32 = 0
+            if henge_vm_display_pixels(&pixelWidth, &pixelHeight) == 0 {
+                let pixels = "\(pixelWidth) × \(pixelHeight)"
+                if pixels != actualDisplayPixels { actualDisplayPixels = pixels }
+            }
             let now = Date(), blocks = henge_vm_blocks()
             blocksPerSecond = Double(blocks &- lastBlocks) / max(now.timeIntervalSince(lastTime), 0.001)
             lastBlocks = blocks

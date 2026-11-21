@@ -5,6 +5,7 @@ set -u
 export LC_ALL=C
 printf 'Henge guest transport check v1\n'
 printf 'macOS='; /usr/bin/sw_vers -productVersion
+printf 'macOS_build='; /usr/bin/sw_vers -buildVersion
 printf 'architecture='; /usr/bin/uname -m
 printf 'guest_utc='; /bin/date -u '+%Y-%m-%dT%H:%M:%SZ'
 printf 'default_ipv4_route='

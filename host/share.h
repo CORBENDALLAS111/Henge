@@ -15,5 +15,9 @@ void hv_share_set_clipboard(const char *text);
 char *hv_share_take_clipboard(void);
 /* Seconds since the helper in macOS was last heard from, or -1 if it never has been. */
 long hv_share_agent_seen(void);
+void hv_share_set_focus_enabled(int enabled);
+/* -2 unavailable/stale, -1 permission needed, 0 noneditable, 1 editable.
+   bounds: normalized x/y/width/height; age: seconds since guest report. */
+int hv_share_focus(double bounds[4], double *age);
 
 #endif

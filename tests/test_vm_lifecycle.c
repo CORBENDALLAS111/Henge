@@ -3,6 +3,7 @@
 #include "install.h"
 #include "jit_region.h"
 #include "vm.h"
+#include "pvg_lite.h"
 
 #include <fcntl.h>
 #include <mach/mach.h>
@@ -19,11 +20,20 @@ static HvJitRegion jit;
 static HengeDualMapping mapping;
 static int failures;
 static _Atomic int reader_done;
-HengeDualMapping *henge_ios_jit_get_mapping(void) { return &mapping; }
+static int memory_prepared, memory_preparations, installer_started;
+void henge_ios_jit_prepare_vm_memory(void) {
+    memory_prepared = 1; memory_preparations++;
+}
+HengeDualMapping *henge_ios_jit_get_mapping(void) {
+    if (!memory_prepared) { fprintf(stderr, "FAIL: VM memory preparation must precede JIT use\n"); failures++; }
+    memory_prepared = 0;
+    return &mapping;
+}
 void hv_prof_ios_start(void) {}
 int hv_install_start(HvVirtioUsb *usb, const char *ipsw, const char *work, uint64_t ecid,
                      HvInstallProgress progress, void *user) {
     (void)usb; (void)ipsw; (void)work; (void)ecid; (void)progress; (void)user;
+    installer_started++;
     return -1;
 }
 static void check(const char *what, int ok) {
@@ -68,6 +78,8 @@ static void *read_ui(void *unused) {
         henge_vm_pointer(&x, &y);
         henge_vm_cpus_on();
         henge_vm_gpu_frames();
+        uint32_t pixels_w, pixels_h;
+        henge_vm_display_pixels(&pixels_w, &pixels_h);
         henge_vm_software_identity_status();
         henge_vm_gamepad_ready();
         henge_vm_balloon(-1);
@@ -112,11 +124,38 @@ int main(void) {
         uint32_t code[] = {outcome == HENGE_VM_OUTCOME_RESTART ? 0xd2800120 : 0xd2800100, 0xf2b08000, 0xd4000002};
         if (outcome == HENGE_VM_OUTCOME_HOST_STOP) code[0] = 0x14000000;
         write_file(rom, code, sizeof code);
+        uint32_t display_w = i % 2 ? 2560 : 1920, display_h = i % 2 ? 1440 : 1080;
+        henge_vm_set_display(display_w, display_h);
+        henge_vm_set_display_mm(0, 0);
         int rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 4, error, sizeof error);
         if (rc) fprintf(stderr, "boot %d: %s\n", i, error);
         check("boot succeeds without restarting app", rc == 0);
         if (rc) break;
         if (outcome == HENGE_VM_OUTCOME_HOST_STOP) {
+            // Follow the real app bridge to the page read by AppleParavirtGPU.
+            uint64_t display_pa = VMAPPLE_MEM + 0x20000;
+            uint8_t *page = hv_phys_ptr(hv_vm_machine(), display_pa, 0x4000);
+            check("guest display page is mapped", page != NULL);
+            if (page) {
+                uint32_t command[] = {1, 20, 0, 0, (uint32_t)(display_pa >> 14)};
+                hv_pvg_lite_command(hv_vm_board()->pvg, command, sizeof command);
+                uint32_t mode; memcpy(&mode, page + 0x210, sizeof mode);
+                check("selected dimensions reach the actual guest mode list", mode == (display_h << 16 | display_w));
+                uint32_t mm; memcpy(&mm, page + 0x14, sizeof mm);
+                check("non-Retina density stays stable at 2K", (mm & 65535) == 400 * display_w / 1920 &&
+                    (mm >> 16) == 400 * display_h / 1920);
+                henge_vm_set_display(0, 0);
+                hv_pvg_lite_command(hv_vm_board()->pvg, command, sizeof command);
+                memcpy(&mode, page + 0x210, sizeof mode);
+                check("invalid mode does not replace selected pixels", mode == (display_h << 16 | display_w));
+                henge_vm_set_display_mm(220, 140);
+                hv_pvg_lite_command(hv_vm_board()->pvg, command, sizeof command);
+                memcpy(&mm, page + 0x14, sizeof mm);
+                check("explicit Retina panel size remains available", mm == (140u << 16 | 220));
+                henge_vm_set_display_mm(0, 0);
+            }
+            uint32_t actual_w, actual_h;
+            check("scanout readback waits for actual drawing", henge_vm_display_pixels(&actual_w, &actual_h) == -1);
             /* This ROM loops without a virtio driver, so events stay in the
                native ring. Check queue cancellation and frame ordering without
                depending on macOS acceleration or display feedback. */
@@ -187,6 +226,8 @@ int main(void) {
         /* movz x1, #0x7000, lsl 16; loop: ldr x2, [x1]; add x2, x2, #1; str x2, [x1]; b loop */
         uint32_t code[] = {0xd2ae0001, 0xf9400022, 0x91000442, 0xf9000022, 0x17fffffd};
         write_file(rom, code, sizeof code);
+        henge_vm_set_display(1920, 1080);
+        henge_vm_set_display_mm(0, 0);
         int rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error);
         check("resume test boots", rc == 0);
         usleep(50000);
@@ -315,6 +356,12 @@ int main(void) {
     hv_vm_destroy();
     atomic_store(&reader_done, 1);
     pthread_join(reader, NULL);
+    int before_install = memory_preparations;
+    check("installer reaches restore after memory preparation",
+          henge_vm_install(rom, disk, aux, 1, "unused", dir, 64, 2, error, sizeof error) != 0
+          && installer_started == 1 && strstr(error, "installer could not start") != NULL);
+    check("installer prepares VM memory", memory_preparations == before_install + 1);
+    hv_vm_destroy();
     hv_jit_region_close(&jit);
     unlink(rom); unlink(disk); unlink(aux); rmdir(dir);
     printf("VM lifecycle: 12 power cycles, 3 failed boots, suspend/resume and experimental identity lifecycle, %d failures\n", failures);

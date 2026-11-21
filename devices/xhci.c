@@ -166,9 +166,11 @@ static void pen_detach(HvXhci *x) {
     atomic_store(&x->pen_ready, 0);
     x->pen_head = x->pen_tail = 0;
     x->pen_blocked = 0;
-    x->pen_last_report_ns = 0;
+    x->pen_mouse_state = x->pen_mouse_delivered = 0;
+    x->pen_last_report_ns = x->pen_button_changed_ns = 0;
     memset(x->pen_state, 0, sizeof x->pen_state);
     memset(x->pen_delivered_state, 0, sizeof x->pen_delivered_state);
+    x->pen_state[0] = x->pen_delivered_state[0] = HV_PEN_REPORT_ID;
     pthread_mutex_unlock(&x->mu);
 }
 
@@ -427,11 +429,18 @@ static int control(HvXhci *x, int slot, const uint8_t setup[8], uint8_t *out, in
     } else if (type == 0xa1 && req == 1) { /* GET_REPORT: wValue is (type << 8) | report ID */
         if (x->slots[slot].dev == 0) src = x->state, len = 8;
         else if (x->slots[slot].dev == 2) {
-            if ((value >> 8) != 1 || (value & 0xff)) return -1;
+            unsigned report_id = value & 0xff;
+            if ((value >> 8) != 1 || (report_id != HV_PEN_REPORT_ID && report_id != HV_PEN_MOUSE_REPORT_ID)) return -1;
             pthread_mutex_lock(&x->mu);
-            memcpy(tmp, x->pen_state, HV_PEN_REPORT_LEN);
+            if (report_id == HV_PEN_MOUSE_REPORT_ID) {
+                hv_pen_mouse_report(tmp, x->pen_mouse_state);
+                len = HV_PEN_MOUSE_REPORT_LEN;
+            } else {
+                memcpy(tmp, x->pen_state, HV_PEN_REPORT_LEN);
+                len = HV_PEN_REPORT_LEN;
+            }
             pthread_mutex_unlock(&x->mu);
-            src = tmp; len = HV_PEN_REPORT_LEN;
+            src = tmp;
         }
         else if (x->slots[slot].dev == 3) {
             if ((value >> 8) != 1 || (value & 0xff)) return -1;
@@ -596,17 +605,34 @@ static void run_ep_in(HvXhci *x, int slot) {
                A backwards host clock after snapshot restore is immediately due. */
             uint64_t now = hid_now_ns(), previous = x->pen_last_report_ns;
             if (previous && now >= previous && now - previous < (uint64_t)HV_PEN_INTERVAL_MS * 1000000) break;
+            const uint8_t *next = x->pen_reports[x->pen_head % HV_PEN_REPORTS];
+            int mouse = next[0] == HV_PEN_MOUSE_REPORT_ID;
+            unsigned old_buttons = (x->pen_delivered_state[1] & (HV_PEN_TIP | HV_PEN_BARREL)) | x->pen_mouse_delivered << 4;
+            unsigned new_buttons = mouse ? (old_buttons & 15) | (unsigned)next[1] << 4
+                                         : (next[1] & (HV_PEN_TIP | HV_PEN_BARREL)) | x->pen_mouse_delivered << 4;
+            if (mouse && next[1] && previous && now >= previous &&
+                now - previous < (uint64_t)HV_PEN_POSITION_DWELL_MS * 1000000) break;
+            uint64_t changed = x->pen_button_changed_ns;
+            int leaving = !mouse && (x->pen_delivered_state[1] & HV_PEN_RANGE) && !(next[1] & HV_PEN_RANGE);
+            // Preserve clicks for a slower desktop consumer, while same-state
+            // hover/drag motion still uses the advertised 1 ms USB interval.
+            if ((old_buttons != new_buttons || leaving) && changed && now >= changed &&
+                now - changed < (uint64_t)HV_PEN_EDGE_DWELL_MS * 1000000) break;
             ring_advance(r);
             uint32_t want = trb[2] & 0x1ffff;
-            uint32_t n = want < HV_PEN_REPORT_LEN ? want : HV_PEN_REPORT_LEN;
             uint8_t *report = x->pen_reports[x->pen_head++ % HV_PEN_REPORTS];
+            uint32_t length = hv_pen_report_length(report);
+            uint32_t n = want < length ? want : length;
             wr(x, (uint64_t)trb[1] << 32 | trb[0], report, n);
-            memcpy(x->pen_delivered_state, report, HV_PEN_REPORT_LEN);
+            if (old_buttons != new_buttons)
+                x->pen_button_changed_ns = new_buttons || changed ? now : 0;
+            if (mouse) x->pen_mouse_delivered = report[1];
+            else memcpy(x->pen_delivered_state, report, HV_PEN_REPORT_LEN);
             x->pen_last_report_ns = now;
             x->pen_delivered++;
             if (x->pen_delivered <= 12)
-                fprintf(stderr, "hengevm: xhci: absolute pen: report delivered (%llu) flags=%02x interval_us=%llu\n",
-                        (unsigned long long)x->pen_delivered, report[0],
+                fprintf(stderr, "hengevm: xhci: absolute pen: report delivered (%llu) id=%u flags=%02x interval_us=%llu\n",
+                        (unsigned long long)x->pen_delivered, report[0], report[1],
                         (unsigned long long)(previous && now >= previous ? (now - previous) / 1000 : 0));
             transfer_event(x, at, n < want ? CC_SHORT_PACKET : CC_SUCCESS, want - n, slot, dci);
             break; /* at most one pen report in this service interval */
@@ -1094,17 +1120,28 @@ static void bar_write(HvPciDev *d, int bar, uint64_t off, uint64_t v, unsigned s
    ordered. Cancellation releases at the last DELIVERED position, not a queued
    future position, so changing input owners never teleports the cursor. */
 static void pen_cancel_locked(HvXhci *x) {
+    x->pen_button_changed_ns = 0; /* cancellation releases immediately */
     x->pen_head = x->pen_tail = 0;
     memcpy(x->pen_state, x->pen_delivered_state, HV_PEN_REPORT_LEN);
-    if (x->pen_state[0] & HV_PEN_RANGE) {
-        x->pen_state[0] &= HV_PEN_RANGE | HV_PEN_INVERT;
-        x->pen_state[5] = x->pen_state[6] = 0;
+    x->pen_mouse_state = 0;
+    if (x->pen_mouse_delivered) hv_pen_mouse_report(x->pen_reports[x->pen_tail++], 0);
+    if (x->pen_state[1] & HV_PEN_RANGE) {
+        x->pen_state[1] &= HV_PEN_RANGE | HV_PEN_INVERT;
+        x->pen_state[6] = x->pen_state[7] = 0;
         memcpy(x->pen_reports[x->pen_tail++], x->pen_state, HV_PEN_REPORT_LEN);
-        x->pen_state[0] = 0;
+        x->pen_state[1] = 0;
         memcpy(x->pen_reports[x->pen_tail++], x->pen_state, HV_PEN_REPORT_LEN);
     }
 }
 
+int hv_xhci_pen_idle(HvXhci *x) {
+    if (!x) return 0;
+    pthread_mutex_lock(&x->mu);
+    int idle = atomic_load(&x->pen_ready) && x->pen_head == x->pen_tail &&
+        !(x->pen_delivered_state[1] & (HV_PEN_TIP | HV_PEN_BARREL)) && !x->pen_mouse_delivered;
+    pthread_mutex_unlock(&x->mu);
+    return idle;
+}
 int hv_xhci_pen_ready(HvXhci *x) { return x && atomic_load(&x->pen_ready); }
 
 void hv_xhci_pen_cancel(HvXhci *x) {
@@ -1116,18 +1153,13 @@ void hv_xhci_pen_cancel(HvXhci *x) {
     hv_machine_wake(x->m);
 }
 
-int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y, int twist, int flags) {
-    if (!hv_xhci_pen_ready(x)) return -1;
-    uint8_t sample[HV_PEN_REPORT_LEN];
-    hv_pen_report(sample, px, py, pressure, tilt_x, tilt_y, twist, flags);
-    pthread_mutex_lock(&x->mu);
-    if (!atomic_load(&x->pen_ready)) { pthread_mutex_unlock(&x->mu); return -1; }
-    if (x->pen_blocked && (sample[0] & HV_PEN_TIP)) { pthread_mutex_unlock(&x->mu); return -1; }
-    x->pen_blocked = 0;
+/* All reports share one queue, so future hover samples cannot overtake a
+   desktop click. Only same-kind, same-state digitizer motion is coalesced. */
+static int pen_enqueue_locked(HvXhci *x, const uint8_t *sample) {
     uint32_t count = x->pen_tail - x->pen_head;
-    uint8_t last = count ? x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS][0] : x->pen_delivered_state[0];
-    uint8_t before = count > 1 ? x->pen_reports[(x->pen_tail - 2) % HV_PEN_REPORTS][0] : x->pen_delivered_state[0];
-    if (count && last == sample[0] && before == last) {
+    unsigned last = count ? hv_pen_report_key(x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS]) : hv_pen_report_key(x->pen_delivered_state);
+    unsigned before = count > 1 ? hv_pen_report_key(x->pen_reports[(x->pen_tail - 2) % HV_PEN_REPORTS]) : hv_pen_report_key(x->pen_delivered_state);
+    if (sample[0] == HV_PEN_REPORT_ID && count && last == hv_pen_report_key(sample) && before == last) {
         memcpy(x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS], sample, HV_PEN_REPORT_LEN);
     } else if (count == HV_PEN_REPORTS) {
         pen_cancel_locked(x);
@@ -1135,16 +1167,46 @@ int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y,
         x->pen_overflows++;
         if (x->pen_overflows <= 4)
             fprintf(stderr, "hengevm: xhci: absolute pen: queue overflow; contact cancelled\n");
-        pthread_mutex_unlock(&x->mu);
-        hv_machine_wake(x->m);
         return -1;
     } else {
         memcpy(x->pen_reports[x->pen_tail++ % HV_PEN_REPORTS], sample, HV_PEN_REPORT_LEN);
     }
-    memcpy(x->pen_state, sample, HV_PEN_REPORT_LEN);
+    return 0;
+}
+int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y, int twist, int flags) {
+    if (!hv_xhci_pen_ready(x)) return -1;
+    uint8_t sample[HV_PEN_REPORT_LEN];
+    hv_pen_report(sample, px, py, pressure, tilt_x, tilt_y, twist, flags);
+    int desktop = flags & HV_PEN_DESKTOP_MASK;
+    if (desktop && !(flags & HV_PEN_RANGE) && !(desktop & HV_PEN_DESKTOP_UP)) return -1;
+    pthread_mutex_lock(&x->mu);
+    if (!atomic_load(&x->pen_ready)) { pthread_mutex_unlock(&x->mu); return -1; }
+    if (x->pen_blocked && ((sample[1] & HV_PEN_TIP) || (desktop && !(desktop & HV_PEN_DESKTOP_UP)))) {
+        pthread_mutex_unlock(&x->mu); return -1;
+    }
+    x->pen_blocked = 0;
+    int result = 0;
+    if (desktop) {
+        unsigned buttons = desktop & HV_PEN_DESKTOP_UP ? 0 : desktop & HV_PEN_DESKTOP_RIGHT ? 2 : 1;
+        if (buttons && !(flags & HV_PEN_DESKTOP_AT_CURSOR)) {
+            /* Position in hover first. Do not send a digitizer contact as well:
+               this click belongs exclusively to the standard Mouse collection. */
+            hv_pen_report(sample, px, py, 0, tilt_x, tilt_y, twist, flags & (HV_PEN_RANGE | HV_PEN_INVERT));
+            result = pen_enqueue_locked(x, sample);
+            if (!result) memcpy(x->pen_state, sample, HV_PEN_REPORT_LEN);
+        }
+        if (!result) {
+            hv_pen_mouse_report(sample, buttons);
+            result = pen_enqueue_locked(x, sample);
+            if (!result) x->pen_mouse_state = buttons;
+        }
+    } else {
+        result = pen_enqueue_locked(x, sample);
+        if (!result) memcpy(x->pen_state, sample, HV_PEN_REPORT_LEN);
+    }
     pthread_mutex_unlock(&x->mu);
     hv_machine_wake(x->m);
-    return 0;
+    return result;
 }
 
 int hv_xhci_gamepad_ready(HvXhci *x) { return x && atomic_load(&x->gamepad_ready) && atomic_load(&x->gamepad_accepting); }
@@ -1280,6 +1342,17 @@ static uint32_t tp_now_ms(void) {
     return (uint32_t)((uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000);
 }
 
+/* Motion may be replaced only when contacts, states and physical button are
+   unchanged. Keep the first frame of a contact transition and its latest move. */
+static int tp_same_contacts(const uint8_t *a, unsigned an, const uint8_t *b, unsigned bn) {
+    if (an != bn || an < 12 || a[1] != b[1]) return 0;
+    for (unsigned at = 12; at + 9 <= an; at += 9) {
+        if ((a[at + 3] >> 5) != (b[at + 3] >> 5) ||
+            (a[at + 8] & 15) != (b[at + 8] & 15)) return 0;
+    }
+    return 1;
+}
+
 /* Queue the current state as a report, stamped with the touch sample's clock (ms);
    ts_ms 0 falls back to the current time (the physical button). */
 static void tp_queue(HvXhci *x, uint32_t ts_ms) {
@@ -1289,12 +1362,23 @@ static void tp_queue(HvXhci *x, uint32_t ts_ms) {
     uint32_t now = ts_ms ? ts_ms : tp_now_ms();
     x->tp_ts = now > x->tp_ts ? now : x->tp_ts + 1;
     int len = tp_build_report(x, r);
-    if (x->tp_rtail - x->tp_rhead < HV_TP_REPORTS) {
-        unsigned at = x->tp_rtail % HV_TP_REPORTS;
-        memcpy(x->tp_reports[at], r, (size_t)len);
-        x->tp_rlen[at] = (uint8_t)len;
-        x->tp_rtail++;
+    uint32_t count = x->tp_rtail - x->tp_rhead;
+    if (count >= 2) {
+        unsigned last = (x->tp_rtail - 1) % HV_TP_REPORTS;
+        unsigned before = (x->tp_rtail - 2) % HV_TP_REPORTS;
+        if (tp_same_contacts(r, (unsigned)len, x->tp_reports[last], x->tp_rlen[last]) &&
+            tp_same_contacts(x->tp_reports[last], x->tp_rlen[last], x->tp_reports[before], x->tp_rlen[before])) {
+            memcpy(x->tp_reports[last], r, (size_t)len);
+            x->tp_rlen[last] = (uint8_t)len;
+            return;
+        }
     }
+    // Always retain the newest complete state, especially stop/empty reports.
+    // A stalled guest must not leave fingers down because its queue filled.
+    if (count == HV_TP_REPORTS) x->tp_rhead++;
+    unsigned at = x->tp_rtail++ % HV_TP_REPORTS;
+    memcpy(x->tp_reports[at], r, (size_t)len);
+    x->tp_rlen[at] = (uint8_t)len;
 }
 
 static struct HvTpFinger *tp_new_finger(HvXhci *x) {

@@ -11,6 +11,7 @@ struct InstallView: View {
     @State private var ramGB = Device.suggestedRAMGB
     @State private var deleteAfter = false
     @State private var softwareCompatibility = false
+    @AppStorage(AppleAccountSupport.setupRequestedKey) private var accountSetupRequested = false
     @State private var refresh = 0 // redraws the list when a download is deleted
     @State private var details = false
     @State private var stageStarted = Date()
@@ -39,6 +40,13 @@ struct InstallView: View {
             .background(Desk.page)
             .navigationTitle(installer.busy ? "Installing" : "Install macOS")
             .onChange(of: release.id) { _, _ in if !release.supportsSoftwareCompatibility { softwareCompatibility = false } }
+            .onChange(of: accountSetupRequested, initial: true) { _, requested in
+                guard requested, !installer.busy else { return }
+                release = MacOSRelease.all.first { $0.id == AppleAccountSupport.recommendedBuild } ?? MacOSRelease.recommended
+                softwareCompatibility = true
+                name = "Mac for Apple Account"
+                accountSetupRequested = false
+            }
             .task {
                 while !Task.isCancelled { // the region may be claimed after a hand-off to StikDebug
                     jitReady = JITBootstrap.ready
@@ -118,7 +126,7 @@ struct InstallView: View {
                     .font(.system(size: 16))
                     .padding(.horizontal, 17).padding(.vertical, 10)
                 if softwareCompatibility {
-                    Text("Creates a new Ventura Mac with a separate software identity and hides virtualization from Apple account services. Sign-in is unverified. Your existing Macs are kept. This Mac requires cold boots instead of Instant Resume.")
+                    Text("Creates a new Mac with a persistent identity for experimental Apple Account compatibility. Sequoia 15.6.1 is recommended. Sign-in on this iPad still needs verification. Your existing Macs are kept. This Mac uses cold boots instead of Instant Resume.")
                         .font(.system(size: 13)).foregroundStyle(Desk.dim)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 17).padding(.bottom, 10)

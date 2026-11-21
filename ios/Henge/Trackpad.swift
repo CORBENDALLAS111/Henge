@@ -45,7 +45,10 @@ struct Trackpad: UIViewRepresentable {
         private var holding = false
         private var holdTimer: Timer?
         private let buzz = UIImpactFeedbackGenerator(style: .medium)
-        private var tapsClick: Bool { VolumeClicks.inputMode == .touchscreen }
+        // Direct Touch delegates only scrolling/system gestures here. Its
+        // context click belongs to a one-finger hold, never a two-finger tap.
+        var allowsTouchscreenClicks = true
+        private var tapsClick: Bool { allowsTouchscreenClicks && VolumeClicks.inputMode == .touchscreen }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -188,13 +191,25 @@ struct Trackpad: UIViewRepresentable {
             if mostFingers >= 4, travelled < Self.tapDistance * 3, Date().timeIntervalSince(started) < Self.tapTime * 2 {
                 NotificationCenter.default.post(name: Trackpad.revealTap, object: nil)
             }
-            StickyKeys.shared.releaseAll()
+            StickyKeys.shared.releaseAfterPointer()
         }
 
         /// A brief press of a mouse button: down then up.
         private func click(_ button: Int32) {
-            henge_vm_mouse_button(button, 1)
-            henge_vm_mouse_button(button, 0)
+            if henge_vm_pen_ready() != 0 {
+                let click = button == 1 ? HENGE_PEN_DESKTOP_RIGHT : HENGE_PEN_DESKTOP_LEFT
+                // A trackpad positions the pointer itself. Send only the mouse
+                // button reports; the old back-to-back VirtIO pulse could lose
+                // the entire click before the desktop observed its down state.
+                let down = 4 | Int32(HENGE_PEN_DESKTOP_AT_CURSOR) | Int32(click)
+                if henge_vm_pen(0, 0, 0, 0, 0, 0, down) == 0 {
+                    _ = henge_vm_pen(0, 0, 0, 0, 0, 0, 4 | Int32(HENGE_PEN_DESKTOP_UP))
+                }
+            } else {
+                // Early boot / older guest driver fallback.
+                henge_vm_mouse_button(button, 1)
+                henge_vm_mouse_button(button, 0)
+            }
             buzz.impactOccurred()
         }
 

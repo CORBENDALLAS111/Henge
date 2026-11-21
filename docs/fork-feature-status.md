@@ -14,7 +14,7 @@ on `feat/pencil-file-bridge` (`808b71d`).
 | Mouse/keyboard/controllers/audio | Details → Connected devices | Existing iPadOS forwarding; generic USB controller; no arbitrary Bluetooth radio passthrough |
 | File import/export and drag/drop | Session Shared Files | Existing shared-folder provider path; cancellation/collision rules tested; guest drag/drop depends on helper |
 | Local network discovery | Settings or Details → Network & Devices | Opt-in system Bonjour relay for iPhone, SMB, SSH and screen sharing; real LAN QA required |
-| Apple Account compatibility | New Ventura Mac installation; account status in Details | Existing exact-build identity/kernel experiment; authenticated sign-in/MID resolution remains unverified |
+| Apple Account compatibility | Settings → Apple Account & App Store; compatible new Mac installation | Ventura plus pinned Sequoia/Tahoe/macOS 27 profiles; account sign-in on this fork remains unverified |
 | Apple transport diagnostics | Details → Network & Devices → Type Diagnostic Command | Packaged guest script; types without pressing Return; no account databases or tokens collected |
 | External display | Existing session display routing | Direct Touch stays local to displayed image; external mode retains trackpad controls |
 | GPU fixes/diagnostics | Existing display controls and bounded logs | Inherited surface validation/format fixes; tested by renderer fixtures; visual guest acceptance still required |
