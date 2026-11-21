@@ -391,3 +391,9 @@ $(B)/test_guest_resolution: ios/Henge/GuestResolution.swift tests/test_guest_res
 test-guest-resolution: $(B)/test_guest_resolution
 	$(B)/test_guest_resolution
 .PHONY: test-guest-resolution
+
+$(B)/test_pvg_retry: tests/test_pvg_retry.c devices/pvg_retry.h | $(B)
+	$(CC) $(CFLAGS) -Idevices $< -o $@
+test-pvg-retry: $(B)/test_pvg_retry
+	$(B)/test_pvg_retry
+.PHONY: test-pvg-retry

@@ -37,6 +37,68 @@ int hv_pvg_trace_on(void) { return 0; }
 }
 @end
 
+@interface ResourceRecoveryReplay : HvReplay {
+@public
+    BOOL functionReady;
+    unsigned functionAttempts, pipelineAttempts;
+    id<MTLFunction> testVertex, testFragment;
+}
+@end
+@implementation ResourceRecoveryReplay
+- (id)makeFunction:(uint64_t)at task:(uint32_t)task {
+    (void)at; (void)task; functionAttempts++;
+    return functionReady ? testFragment : nil;
+}
+- (id)makeSerialized:(uint64_t)at length:(uint32_t)length task:(uint32_t)task {
+    (void)at; (void)length; pipelineAttempts++;
+    id<MTLFunction> fragment=[self get:1 task:task];
+    if (!fragment) return nil;
+    MTLRenderPipelineDescriptor *pd=[MTLRenderPipelineDescriptor new];
+    pd.vertexFunction=testVertex; pd.fragmentFunction=fragment;
+    pd.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
+    NSError *error=nil;
+    id<MTLRenderPipelineState> pipe=[device newRenderPipelineStateWithDescriptor:pd error:&error];
+    assert(pipe && !error);
+    return pipe;
+}
+@end
+
+static void test_failed_resource_recovery(id<MTLDevice> device) {
+    memset(guest,0,sizeof guest);
+    ResourceRecoveryReplay *r=[ResourceRecoveryReplay new];
+    r->device=device; r->tasks=[NSMutableDictionary new]; r->complaints=[NSMutableSet new];
+    NSError *error=nil;
+    id<MTLLibrary> library=[device newLibraryWithSource:@"#include <metal_stdlib>\nusing namespace metal;\nvertex float4 v(uint i [[vertex_id]]) { return float4((i & 1) ? 1.0 : -1.0, (i & 2) ? 1.0 : -1.0, 0, 1); }\nfragment float4 f() { return float4(0,1,0,1); }" options:nil error:&error];
+    assert(library && !error);
+    r->testVertex=[library newFunctionWithName:@"v"]; r->testFragment=[library newFunctionWithName:@"f"];
+    uint32_t *entries=(uint32_t *)(guest+0x100);
+    entries[3]=(20<<8)|OBJ_FUNCTION; entries[4]=0x2000;
+    entries[6]=(32<<8)|OBJ_SERIALIZED; entries[7]=0x2100;
+    // First lookup fails, leaving the exact same guest refs and definitions.
+    HvObject *failed=[r object:2 task:0];
+    assert(failed && !failed->object && r->functionAttempts==1 && r->pipelineAttempts==1);
+    r->functionReady=YES;
+    failed->retry_after=now_seconds()+60; // deterministic throttle test, no timing assumption
+    for(int i=0;i<100;i++) assert([r object:2 task:0]==failed);
+    assert(r->functionAttempts==1 && r->pipelineAttempts==1); // no per-draw retry storm
+    HvObject *function=r->tasks[@0][@1];
+    assert(function && !function->object);
+    failed->retry_after=0; function->retry_after=0; // deterministic expiry, no wall-clock wait
+    HvObject *recovered=[r object:2 task:0];
+    assert(recovered != failed && recovered->object);
+    assert(r->functionAttempts==2 && r->pipelineAttempts==2);
+    assert([r get:2 task:0]==recovered->object && r->pipelineAttempts==2);
+    assert(!recovered->failure_count && !recovered->retry_after);
+    // A changed guest definition is not delayed by a failure of its former ref.
+    entries[7]=0x2200;
+    HvObject *changed=[r object:2 task:0];
+    assert(changed!=recovered && changed->object && r->pipelineAttempts==3);
+    // Retry saturation remains recoverable; it is not a permanent error cache.
+    HvObject *f=r->tasks[@0][@1]; f->object=nil; f->failure_count=16; f->retry_after=0;
+    assert([r get:1 task:0] && r->functionAttempts==3);
+    puts("PASS: failed shader/pipeline cache recovers with unchanged refs, throttles failures and retains successful resources");
+}
+
 static void texture_record(uint32_t at, uint32_t width) {
     uint32_t header[] = {1, 36, 1};
     memcpy(guest + at, header, sizeof header);
@@ -211,6 +273,7 @@ int main(void) {
             bytes[i] = 1; assert(hash_bytes(bytes, sizeof bytes) != initial); bytes[i] = 0;
         }
         test_view_reuse(device); test_planes(device); test_invalid_mapping(device); test_surface_identity();
+        test_failed_resource_recovery(device);
         test_missing_pipeline_diagnostics();
         test_guest_magenta_clear(device);
         puts("PASS: every-byte updates, dirty-plane preservation, upload fence, invalid plane, reused parent views, invalid mapping rejection, complete backing identity");
