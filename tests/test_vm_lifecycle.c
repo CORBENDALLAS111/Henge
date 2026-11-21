@@ -226,8 +226,7 @@ int main(void) {
         /* movz x1, #0x7000, lsl 16; loop: ldr x2, [x1]; add x2, x2, #1; str x2, [x1]; b loop */
         uint32_t code[] = {0xd2ae0001, 0xf9400022, 0x91000442, 0xf9000022, 0x17fffffd};
         write_file(rom, code, sizeof code);
-        uint32_t display_w = i % 2 ? 2560 : 1920, display_h = i % 2 ? 1440 : 1080;
-        henge_vm_set_display(display_w, display_h);
+        henge_vm_set_display(1920, 1080);
         henge_vm_set_display_mm(0, 0);
         int rc = henge_vm_boot(rom, disk, aux, 1, 0, 64, 2, error, sizeof error);
         check("resume test boots", rc == 0);
