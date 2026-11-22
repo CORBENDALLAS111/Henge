@@ -24,7 +24,7 @@ int hv_legacy_vmm_match(const uint8_t *code, size_t size) {
 }
 
 int hv_legacy_vmm_process_name_at(const uint8_t *proc,size_t size,size_t off,char name[33]) {
-    if (off!=HV_LEGACY_PROC_COMM) return 0; /* only the measured Ventura layout */
+    if (off!=0x5b8u && off!=0x5ccu && off!=0x5bcu) return 0; /* pinned Ventura, Sequoia/Tahoe and macOS 27 layouts */
     if(!proc || size<off+17+33) return 0;
     const uint8_t *full=proc+off+17,*end=memchr(full,0,33);
     if(!end || end==full) return 0;

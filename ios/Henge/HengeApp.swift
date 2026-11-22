@@ -66,6 +66,9 @@ struct RootView: View {
             }
         }
         .background(WindowStyle(style: running != nil ? .dark : appearance.style))
+        .onReceive(NotificationCenter.default.publisher(for: AppleAccountSupport.setupRequested)) { _ in
+            if henge_vm_can_start() != 0 && !Installer.shared.busy { running = nil; tab = .install }
+        }
         .sheet(isPresented: $jit.showSetup) { JITSetupFlow() }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }

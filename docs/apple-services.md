@@ -1,15 +1,19 @@
 # Apple services in Henge
 
-Apple Account and Mac App Store login have **not** been verified. This branch
-adds an **opt-in experiment for a new Ventura 13.6 (22G120) VM**, described in
-[ventura-account-experiment.md](ventura-account-experiment.md). It is not an
-Apple-supported provisioning path or a confirmed sign-in fix. The existing
-README reports a verification error. The user subsequently supplied a Ventura
-App Store screenshot with the exact message **"MID is invalid."** The catalog
-behind the dialog has loaded, but catalog access does not verify authenticated
-services. No guest account-service logs or affected VM were available, so the
-underlying error domain/code and any concurrent transport failure remain unknown.
-Account details from the screenshot are deliberately not reproduced here.
+Apple Account and Mac App Store login have **not been reproduced in this fork**.
+This build extends the opt-in compatibility path to the exact Sequoia 15.6.1,
+Tahoe 26.6.2 and macOS 27.2 restore builds, retaining the earlier Ventura 13.6
+experiment. See [setup and verification](apple-account-setup.md).
+
+The source fork reports successful account/App Store and cloud-service tests on
+its native macOS-hosted emulator. Those are useful upstream results, not proof
+of this iOS build or the user's existing VM. The three added kernel profiles
+were independently audited against Apple's actual restore kernels. No account
+credentials, physical machine identifiers or provisioned guest images are included.
+
+The earlier user screenshot reported **"MID is invalid"** in Ventura App Store.
+No guest account-service log or affected live VM was provided. Its underlying
+error domain/code remains unknown. Account details are deliberately omitted.
 
 ## Observed machine-identity rejection
 
@@ -40,8 +44,9 @@ Keychain rather than regenerating identifiers or deleting account state.
   services run inside macOS; the host cannot infer whether their databases are
   healthy or whether a daemon is merely waiting to be launched on demand.
 - `devices/cfg.c` supplies an emulated VM identity, with default serial `1234`.
-  The iOS bridge does not supply a serial override. Persisted ECID/seed and
-  cosmetic About This Mac model changes are not Apple's VM identity provisioning.
+  Ordinary Macs keep that default; opted-in new Macs pass a persistent synthetic
+  serial, board identity and distinct network addresses through the native bridge.
+  Persisted ECID/seed and cosmetic model changes are not Apple's VM identity provisioning.
   Changing these values or copying a physical Mac's serial is not a login fix.
 
 ## Platform limitation
@@ -73,6 +78,32 @@ daemon presence. It sends unauthenticated requests to three fixed public Apple
 endpoints. It does not read Keychains, account databases, identifiers, tokens,
 cookies or HTTP bodies and never attempts sign-in. A 3xx/4xx HTTP response can
 still establish successful DNS/TCP/TLS; `curl_exit=0` does not establish login.
+
+For an existing Ventura guest, repeat the failed login and then run
+`bash check-apple-services.sh --account-errors` within ten minutes. The script
+also checks the exact kernel build, whether the legacy model is visible and
+whether the serial is still the `1234` placeholder. It outputs only yes/no or
+fixed status values for these identity indicators. A recognized build or a
+non-placeholder serial alone does not mean compatibility or sign-in succeeded.
+
+The optional error mode reads recent error/fault events from selected account
+processes, and outputs only allowlisted error-domain names, integer codes and
+counts. Raw messages, account names, tokens and identifiers are never printed
+or written to a file. The log reader's exit code is reported: no detected pairs
+can mean unavailable/redacted logs, not absence of an authentication failure.
+Nested errors or unrelated account events can appear in the same ten-minute
+window; correlate them with the attempted login rather than assuming a cause.
+
+The current script can be used without updating the IPA. Run inside Ventura:
+
+```sh
+curl -fsS 'https://raw.githubusercontent.com/CORBENDALLAS111/Henge/fix/apple-account-compatibility/tools/check-apple-services.sh' | /bin/bash -s -- --account-errors
+```
+
+This is a read-only diagnostic, not an account reset. Do not rotate the saved
+identity or erase caches/Keychains merely because App Store still says Sign In.
+The user's earlier report had reached MFA before an app-version incompatibility;
+that observation does not confirm completion of the current login attempt.
 
 - Missing route/DNS: check Henge's NAT startup and bounded DNS failure messages
   in `henge.log`, and compare a different network/VPN configuration.

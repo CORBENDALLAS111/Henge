@@ -78,9 +78,13 @@ void henge_vm_share(const char *folder, const char *socket_path, const char *age
 void henge_share_set_clipboard(const char *text);
 char *henge_share_take_clipboard(void);
 long henge_share_agent_seen(void);
+void henge_share_set_focus_enabled(int enabled);
+int henge_share_focus(double bounds[4], double *age);
 
 /* The size macOS is told its screen is. Before henge_vm_boot. */
 void henge_vm_set_display(uint32_t width, uint32_t height);
+/* Physical pixel size of the actual Mac scanout, or -1 before the guest draws. */
+int henge_vm_display_pixels(uint32_t *width, uint32_t *height);
 /* What the guest's About This Mac says, for the next boot (NULL leaves the vmapple
    identity): the chip's name, the product name, and — experimental — the model
    identifier (hw.model). The chip goes through the config region; the other two
@@ -93,12 +97,16 @@ void henge_vm_key_hid(uint8_t usage, int down); /* a hardware keyboard: iOS give
 void henge_vm_mouse_move(int dx, int dy);
 void henge_vm_pointer_reset(void);
 int henge_vm_pen_ready(void);
+int henge_vm_pen_idle(void);
 /* One generic USB gamepad, independent of Bluetooth pairing on the host. */
 int henge_vm_gamepad_ready(void);
 int henge_vm_gamepad(unsigned buttons, int hat, const int32_t axes[6]);
 void henge_vm_gamepad_cancel(void);
 /* HID units: XY 0..32767; pressure 0..4095; tilt hundredths of degrees;
-   twist hundredths of degrees 0..35999. flags tip=1, barrel=2, range=4, invert=8. */
+   twist hundredths of degrees 0..35999. flags tip=1, barrel=2, range=4, invert=8.
+   Desktop clicks use a separate USB Mouse report, never a digitizer contact. */
+enum { HENGE_PEN_DESKTOP_LEFT = 32, HENGE_PEN_DESKTOP_RIGHT = 64, HENGE_PEN_DESKTOP_UP = 128, HENGE_PEN_DESKTOP_AT_CURSOR = 256, HENGE_PEN_DRAWING = 512 };
+/* All position/button reports remain ordered on the same USB endpoint. */
 int henge_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags);
 void henge_vm_pen_cancel(void);
 void henge_vm_mouse_button(int button, int down);

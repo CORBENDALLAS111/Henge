@@ -1,23 +1,31 @@
 import SwiftUI
 
 struct TouchGestureGuide: View {
+    @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
+    @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
     var body: some View {
         Form {
             Section("Direct Touch") {
                 LabeledContent("Click", value: "Tap once")
                 LabeledContent("Double-click", value: "Tap twice")
-                LabeledContent("Drag or select", value: "Touch and move")
+                LabeledContent("Drag or select", value: oneFingerScrolling ? "Pause briefly, then move" : "Touch and move")
                 LabeledContent("Context menu", value: "Hold still")
-                LabeledContent("Scroll", value: "Move two fingers")
+                LabeledContent("Scroll", value: oneFingerScrolling ? "Swipe with one finger" : "Move two fingers")
+                Text("Change one-finger scrolling in Touch Controls. When enabled, swipe to scroll, or pause for about a quarter second before moving to drag. Keep holding still for the context menu. Two-finger scrolling is also available. macOS supplies the scrolling direction and inertia; Pencil dragging is unchanged.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Tapping with two fingers does not click in Direct Touch. Use a one-finger hold for the context menu. Tap the hand/trackpad icon in the session bar to switch control methods.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Text("Small movements during a tap are ignored. A contact circle follows your finger and disappears when you lift. The mouse arrow appears again for Pencil hover or a connected mouse.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Apple Pencil") {
                 LabeledContent("Hover", value: "Move the tip above the screen")
-                LabeledContent("Click", value: "Touch and lift")
-                LabeledContent("Double-click", value: "Hold still briefly, then lift")
+                LabeledContent("Tip", value: pencilTablet ? "Begin a stroke immediately" : "Touch and lift to click")
+                if !pencilTablet { LabeledContent("Double-click", value: "Hold still briefly, then lift") }
                 LabeledContent("Drag or select", value: "Touch and move")
-                Text("Hold the tip still for about half a second, then lift to double-click. Moving before lifting starts a drag instead. Pressure and tilt are sent while dragging; supported Pencil Pro hardware also sends barrel roll.")
+                Text(pencilTablet
+                     ? "Graphics tablet mode sends contact and pressure from the first sample, including stationary dots and tiny strokes. Pressure, tilt and Pencil Pro barrel roll are sent to the Mac's pen device. Drawing apps must support tablet input. Change this mode in Touch Controls."
+                     : "Hold the tip still for about half a second, then lift to double-click. Moving before lifting starts a drag instead. Enable graphics tablet mode in Touch Controls for drawing.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Text("Barrel double-tap and Pencil Pro squeeze follow your Pencil preferences in the device's Settings. Eraser actions switch tools; palette actions open a context menu at the hovered point. Hover needs a compatible iPad and Pencil.")
                     .font(.footnote).foregroundStyle(.secondary)

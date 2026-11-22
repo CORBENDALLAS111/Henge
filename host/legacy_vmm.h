@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "cpu.h"
 struct HvMachine;
+#define HV_LEGACY_MAX_PROC_COMM 0x5ccu /* largest pinned layout; includes Sequoia/Tahoe */
 #define HV_LEGACY_PROC_COMM 0x5b8u /* measured ARM64_VMAPPLE Ventura 22G120 proc layout */
 
 /* Opt-in counterpart of VMHide's per-process sysctl policy. No guest disk,

@@ -793,6 +793,7 @@ int hv_vm_gamepad(unsigned buttons, int hat, const int axes[6]) {
 }
 void hv_vm_gamepad_cancel(void) { if (!atomic_load(&input_stopping)) hv_xhci_gamepad_cancel(board.usb); }
 
+int hv_vm_pen_idle(void) { return !atomic_load(&input_stopping) && hv_xhci_pen_idle(board.usb); }
 int hv_vm_pen_ready(void) { return !atomic_load(&input_stopping) && hv_xhci_pen_ready(board.usb); }
 int hv_vm_pen(int x, int y, int pressure, int tilt_x, int tilt_y, int twist, int flags) {
     if (atomic_load(&input_stopping)) return -1;

@@ -1,3 +1,4 @@
+#include "pvg_retry.h"
 /* Runs the guest's GPU commands on the host's Metal, on any Apple platform.
    The guest driver serializes Metal calls: an exec names command buffers in a
    task's memory, each a segment holding {tag, size} records, one per call, in
@@ -76,6 +77,9 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
 @public
     id object;
     uint32_t entry[3];
+    BOOL building; /* reject recursive use of a resource still being constructed */
+    uint32_t failure_count;
+    double retry_after; /* only failed functions/serialized pipelines use this */
     /* A buffer's guest pages, mapped contiguously. */
     uint8_t *mapped;
     BOOL mapping_in_buffer; /* the buffer over them frees them */
@@ -161,6 +165,7 @@ enum { OBJ_BUFFER = 1, OBJ_TEXTURE = 2, OBJ_FUNCTION = 6, OBJ_SERIALIZED = 7, OB
     NSUInteger pass_width, pass_height, pass_format;
     BOOL pass_clears_magenta;
     uint64_t skipped_render_draws, skipped_compute_dispatches;
+    unsigned recovered_resources_logged;
     NSMutableSet<NSString *> *replay_notes;
     BOOL tess_factors; /* so is a tessellation factor buffer */
     uint32_t pre_raster_samples, pre_imageblock, pre_threadgroup, pre_tile_w, pre_tile_h; /* for the next pass */
@@ -1178,35 +1183,47 @@ static NSData *surface_key(HvObject *s, const uint32_t *pages, uint64_t count) {
     NSMutableDictionary *objs = tasks[@(task)];
     if (!objs) tasks[@(task)] = objs = [NSMutableDictionary new];
     HvObject *o = objs[@(ref)];
+    uint32_t failures = 0;
     if (o && !memcmp(o->entry, e, 12)) {
-        /* macOS 14's driver names a surface before it writes the surface's description: try again a while.
-           And it reuses surface ids: a texture over a surface that has since been replaced is made again. */
-        BOOL replaced = o->object && (e[0] & 0xff) == OBJ_MAPPED_TEXTURE &&
-                        o->surface != [self currentSurface:o->on_mapping];
-        if (replaced) o->retries = 0;
-        if ((!o->object || replaced) && (e[0] & 0xff) == OBJ_MAPPED_TEXTURE && o->retries < 600) {
-            uint32_t tries = o->retries + 1;
-            o = nil;
-            HvObject *again = [HvObject new];
-            memcpy(again->entry, e, 12);
-            again->retries = tries;
-            objs[@(ref)] = again;
-            uint64_t at = (uint64_t)e[2] << 32 | e[1];
-            [self makeMappedTexture:again at:at task:task];
-            static int told;
-            if (again->object && told++ < 30) fprintf(stderr, "hengevm: pvg-metal: task %u ref %u: texture made on try %u%s\n", task, ref, tries, replaced ? " (surface replaced)" : "");
-            return again;
-        }
-        BOOL parent_replaced = o->parent_ref && [self object:o->parent_ref task:task] != o->parent;
-        if (!parent_replaced) {
-            if (!o->follows) return o;
-            if (o->follows->mapped) refresh_pages(self, task, o->follows);
-            if (o->follows->generation == o->follows_generation) return o;
+        if (o->building) return o;
+        uint32_t kind = e[0] & 0xff;
+        BOOL retryable = !o->object && (kind == OBJ_FUNCTION || kind == OBJ_SERIALIZED);
+        if (retryable) {
+            if (now_seconds() < o->retry_after) return o;
+            failures = o->failure_count < 16 ? o->failure_count : 16;
+        } else {
+            /* macOS 14's driver names a surface before it writes the surface's description: try again a while.
+               And it reuses surface ids: a texture over a surface that has since been replaced is made again. */
+            BOOL replaced = o->object && (e[0] & 0xff) == OBJ_MAPPED_TEXTURE &&
+                            o->surface != [self currentSurface:o->on_mapping];
+            if (replaced) o->retries = 0;
+            if ((!o->object || replaced) && (e[0] & 0xff) == OBJ_MAPPED_TEXTURE && o->retries < 600) {
+                uint32_t tries = o->retries + 1;
+                o = nil;
+                HvObject *again = [HvObject new];
+                memcpy(again->entry, e, 12);
+                again->retries = tries;
+                objs[@(ref)] = again;
+                uint64_t at = (uint64_t)e[2] << 32 | e[1];
+                again->building = YES;
+                [self makeMappedTexture:again at:at task:task];
+                again->building = NO;
+                static int told;
+                if (again->object && told++ < 30) fprintf(stderr, "hengevm: pvg-metal: task %u ref %u: texture made on try %u%s\n", task, ref, tries, replaced ? " (surface replaced)" : "");
+                return again;
+            }
+            BOOL parent_replaced = o->parent_ref && [self object:o->parent_ref task:task] != o->parent;
+            if (!parent_replaced) {
+                if (!o->follows) return o;
+                if (o->follows->mapped) refresh_pages(self, task, o->follows);
+                if (o->follows->generation == o->follows_generation) return o;
+            }
         }
     }
     o = [HvObject new];
     memcpy(o->entry, e, 12);
     objs[@(ref)] = o;
+    o->building = YES;
     uint32_t type = e[0] & 0xff, size = e[0] >> 8;
     uint64_t at = (uint64_t)e[2] << 32 | e[1];
     switch (type) {
@@ -1233,6 +1250,14 @@ static NSData *surface_key(HvObject *s, const uint32_t *pages, uint64_t count) {
         [self complain:m];
         break;
     }
+    }
+    o->building = NO;
+    if (!o->object && (type == OBJ_FUNCTION || type == OBJ_SERIALIZED)) {
+        o->failure_count = failures < 16 ? failures + 1 : 16;
+        o->retry_after = now_seconds() + hv_pvg_retry_delay(o->failure_count);
+    } else if (o->object && failures && recovered_resources_logged < 32) {
+        recovered_resources_logged++;
+        fprintf(stderr, "hengevm: pvg-replay: resource-recovered task=%u ref=%u type=%u failures=%u\n", task, ref, type, failures);
     }
     return o;
 }
@@ -3042,6 +3067,18 @@ int hv_pvg_metal_snapshot(HvPvgMetal *m, uint8_t *bgra, uint32_t w, uint32_t h) 
             out[3] = 255;
         }
     }
+    return 0;
+}
+
+int hv_pvg_metal_scanout_size(HvPvgMetal *m, uint32_t *w, uint32_t *h) {
+    if (!m || !w || !h) return -1;
+    HvReplay *r = (__bridge HvReplay *)m;
+    os_unfair_lock_lock(&r->screen_lock);
+    uint32_t width = r->screen_w, height = r->screen_h;
+    BOOL ready = r->screen_tex != nil && width && height;
+    os_unfair_lock_unlock(&r->screen_lock);
+    if (!ready) return -1;
+    *w = width; *h = height;
     return 0;
 }
 

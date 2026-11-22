@@ -58,6 +58,18 @@ struct MacSettingsView: View {
                 .padding(.vertical, 10)
                 .deskCard()
 
+                DeskHeading("Apple Account")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(AppleAccountSupport.status(identityPresent: mac.activeSoftwareIdentity != nil, nativeStatus: nil))
+                    NavigationLink("Apple Account & App Store") {
+                        AppleAccountSetupView(macID: mac.id)
+                    }
+                    Text("Set up a compatible Mac or check what this Mac needs for account sign-in.")
+                        .font(.footnote).foregroundStyle(Desk.dim)
+                }
+                .padding(17)
+                .deskCard()
+
                 DeskHeading("About This Mac")
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle(isOn: Binding(get: { mac.reportHostIdentity ?? false }, set: {
@@ -85,6 +97,7 @@ struct MacSettingsView: View {
                     Picker("Resolution", selection: Binding(get: {
                         if mac.customResolution == true { return "custom" }
                         if mac.isRetina { return "retina" }
+                        if mac.screen.width == 2560, mac.screen.height == 1440 { return "qhd" }
                         if mac.screen.width == Device.performanceScreen.width,
                            mac.screen.height == Device.performanceScreen.height { return "performance" }
                         if mac.screen.width == 1920, mac.screen.height == 1080 { return "wide" }
@@ -92,7 +105,7 @@ struct MacSettingsView: View {
                     }, set: { choice in
                         if choice == "custom" {
                             let current = mac.screen
-                            let size = validCustomResolution ?? current
+                            let size = current
                             mac.retina = false
                             mac.customResolution = true
                             (mac.screenWidth, mac.screenHeight) = size
@@ -105,6 +118,7 @@ struct MacSettingsView: View {
                             case "retina": break
                             case "performance": (mac.screenWidth, mac.screenHeight) = Device.performanceScreen
                             case "wide": (mac.screenWidth, mac.screenHeight) = (1920, 1080)
+                            case "qhd": (mac.screenWidth, mac.screenHeight) = (2560, 1440)
                             default: (mac.screenWidth, mac.screenHeight) = Device.fittingScreen
                             }
                         }
@@ -115,7 +129,8 @@ struct MacSettingsView: View {
                             Text("Performance").tag("performance")
                         }
                         Text("Fit this \(Device.name)").tag("fit")
-                        Text("16:9").tag("wide")
+                        Text("1920 × 1080 (Full HD)").tag("wide")
+                        Text("2560 × 1440 (QHD / 2K)").tag("qhd")
                         Text("Custom").tag("custom")
                     }
                     .pickerStyle(.menu)
@@ -132,19 +147,16 @@ struct MacSettingsView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .accessibilityLabel("Custom screen height in pixels")
                         }
-                        if let size = validCustomResolution {
-                            Button("Apply custom resolution") {
-                                (mac.screenWidth, mac.screenHeight) = size
-                                save()
-                            }
-                            .disabled(mac.screen.width == size.width && mac.screen.height == size.height)
-                        } else {
+                        if validCustomResolution == nil {
                             Text("Enter 640–7680 × 480–4320 pixels, up to 8.3 million pixels.")
                                 .font(.system(size: 13)).foregroundStyle(Desk.bad)
+                        } else {
+                            Text("Valid sizes are saved automatically.")
+                                .font(.footnote).foregroundStyle(Desk.dim)
                         }
                     }
 
-                    Text("\(mac.screen.width) × \(mac.screen.height). Changes apply the next time this Mac starts.")
+                    Text("\(mac.screen.width) × \(mac.screen.height) pixels. Shut down macOS and start it again to apply; resuming a running Mac keeps its current display.")
                         .font(.system(size: 13)).foregroundStyle(Desk.dim)
                 }
 
@@ -170,6 +182,11 @@ struct MacSettingsView: View {
         .background(Desk.page)
         .navigationTitle(mac.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if let current = machines.all.first(where: { $0.id == mac.id }) { mac = current }
+        }
+        .onChange(of: customWidth) { _ in saveValidCustomDraft() }
+        .onChange(of: customHeight) { _ in saveValidCustomDraft() }
         .onDisappear(perform: save)
         .fileMover(isPresented: $movingExport, file: machines.lastExport) { result in
             switch result {
@@ -231,15 +248,20 @@ struct MacSettingsView: View {
     }
 
     /// Invalid drafts are not saved to guest configuration.
-    private var validCustomResolution: (width: Int, height: Int)? {
-        guard let width = Int(customWidth.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let height = Int(customHeight.trimmingCharacters(in: .whitespacesAndNewlines)),
-              (640...7680).contains(width), (480...4320).contains(height),
-              width * height <= 8_294_400 else { return nil }
-        return (width, height)
+    private var validCustomResolution: GuestResolution? {
+        GuestResolution(width: customWidth, height: customHeight)
+    }
+
+    private func saveValidCustomDraft() {
+        guard mac.customResolution == true, validCustomResolution != nil else { return }
+        save()
     }
 
     private func save() {
+        if mac.customResolution == true, let size = validCustomResolution {
+            mac.retina = false
+            (mac.screenWidth, mac.screenHeight) = (size.width, size.height)
+        }
         if mac.name.isEmpty { mac.name = "Mac" }
         machines.update(mac)
     }

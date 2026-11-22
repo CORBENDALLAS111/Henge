@@ -216,6 +216,7 @@ static int boot_or_resume(const char *rom, const char *disk, const char *aux, ui
                           int cpus, const char *resume, const char *ident, char *err, size_t errlen) {
     { extern void hv_prof_ios_start(void); hv_prof_ios_start(); }
     if (begin_start(err, errlen)) return -1;
+    henge_ios_jit_prepare_vm_memory();
     HengeDualMapping *jit = henge_ios_jit_get_mapping();
     if (!jit || !jit->rw_addr) {
         snprintf(err, errlen, "Henge has no JIT region. Turn on JIT first.");
@@ -251,6 +252,7 @@ int henge_vm_software_identity_status(void) {
     HvMachine *m=hv_vm_machine();
     int board_ready=!m->compat_boot || __atomic_load_n(&m->compat_boot_done,__ATOMIC_ACQUIRE)==2;
     int status=m->compat_match ? (board_ready && __atomic_load_n(&m->compat_pc,__ATOMIC_ACQUIRE)?2:1) : 0;
+    if (m->compat_match && m->compat_boot && __atomic_load_n(&m->compat_boot_done,__ATOMIC_ACQUIRE)==3) status=-1;
     pthread_rwlock_unlock(&api_lock);
     return status;
 }
@@ -273,6 +275,7 @@ static void on_install_progress(int step, double p, void *user) {
 int henge_vm_install(const char *rom, const char *disk, const char *aux, uint64_t ecid, const char *ipsw,
                      const char *workdir, uint64_t ram_mb, int cpus, char *err, size_t errlen) {
     if (begin_start(err, errlen)) return -1;
+    henge_ios_jit_prepare_vm_memory();
     HengeDualMapping *jit = henge_ios_jit_get_mapping();
     if (!jit || !jit->rw_addr) {
         snprintf(err, errlen, "Henge has no JIT region. Turn on JIT first.");
@@ -421,7 +424,16 @@ void henge_vm_share(const char *folder, const char *socket_path, const char *age
 }
 void henge_share_set_clipboard(const char *text) { hv_share_set_clipboard(text); }
 char *henge_share_take_clipboard(void) { return hv_share_take_clipboard(); }
+void henge_share_set_focus_enabled(int enabled) { hv_share_set_focus_enabled(enabled); }
+int henge_share_focus(double bounds[4], double *age) { return hv_share_focus(bounds,age); }
 long henge_share_agent_seen(void) { return hv_share_agent_seen(); }
+
+int henge_vm_display_pixels(uint32_t *width, uint32_t *height) {
+    if (!lock_running()) return -1;
+    int result = hv_pvg_lite_scanout_size(hv_vm_board()->pvg, width, height);
+    pthread_rwlock_unlock(&api_lock);
+    return result;
+}
 
 void henge_vm_set_display(uint32_t width, uint32_t height) { hv_pvg_lite_set_mode(width, height); }
 void henge_vm_set_display_mm(uint32_t width_mm, uint32_t height_mm) { hv_pvg_lite_set_size_mm(width_mm, height_mm); }
@@ -445,6 +457,12 @@ void henge_vm_pointer_reset(void) {
     if (!lock_running()) return;
     hv_vm_pointer_reset();
     pthread_rwlock_unlock(&api_lock);
+}
+int henge_vm_pen_idle(void) {
+    if (!lock_running()) return 0;
+    int idle = hv_vm_pen_idle();
+    pthread_rwlock_unlock(&api_lock);
+    return idle;
 }
 int henge_vm_pen_ready(void) {
     if (!lock_running()) return 0;
