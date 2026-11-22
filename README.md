@@ -52,13 +52,14 @@ Then a Henge folder in the Mac's home folder is the same folder as Files › Hen
 
 ## Known limits
 
+- See the [macOS and Sidecar feature audit](docs/MACOS_FEATURE_PARITY.md) for branch dependencies, implementation boundaries and physical-device verification requirements.
 - [Pencil, connected-device input and Shared Files drag-and-drop](docs/pencil-devices-files.md) have experimental bridges; on-device compatibility is not yet verified.
-- Signing in to an Apple Account inside macOS fails with a verification error. An opt-in [Ventura 13.6 experiment](docs/ventura-account-experiment.md) is available for a separate new VM; sign-in and App Store downloads remain unverified.
+- Signing in to an Apple Account inside macOS can fail with a verification error. An opt-in [Ventura 13.6 experiment](docs/ventura-account-experiment.md) supports compatible new or existing VMs without resetting their data; sign-in and App Store downloads remain unverified.
   See [Apple services diagnostics and platform limits](docs/apple-services.md).
 - Graphics are tested on macOS's own apps, Chrome, Firefox, VS Code and Discord. Other apps may draw wrongly.
 - On macOS Sonoma, switching to a dynamic wallpaper (such as Sonoma) can stop the screen updating; opening any app brings it back. On Ventura, the Calendar icon in the Dock is missing its date.
 - For the first few minutes after you log in, macOS is busy starting up in the background, so apps open more slowly.
-- Only one Mac can start per launch. Quit Henge and open it again to start another, and to start one again after restarting or shutting down macOS.
+- One Mac runs at a time. Normal guest shutdown/restart supports sequential sessions; the installer/restore path still requires an app relaunch. See [guest shutdown and lifecycle](docs/guest-shutdown.md).
 - iPadOS keeps some keyboard shortcuts for itself, such as Command-Tab.
 - It's emulation, so it runs slower than a real Mac.
 
