@@ -9,6 +9,14 @@ struct SessionView: View {
     let mac: VirtualMac
     let close: () -> Void
 
+    init(mac: VirtualMac, close: @escaping () -> Void) {
+        self.mac = mac
+        self.close = close
+        _sidebar = State(initialValue: SidebarPreferences.load(for: mac.id))
+    }
+
+    @State private var sidebar: SidebarPreferences
+
     @StateObject private var display = DisplayRouter()
     @StateObject private var fileTransfers = FileTransfers()
     @StateObject private var gamepad = HardwareGamepad.shared
@@ -201,6 +209,11 @@ struct SessionView: View {
                         .accessibilityLabel("Move Mac view vertically")
                         .accessibilityAdjustableAction { direction in keyboardPan += direction == .increment ? 32 : -32 }
                 }
+                if sidebar.enabled && touchInputActive && !controlsHidden {
+                    FloatingSidebar(preferences: $sidebar, keyboardVisible: $typing,
+                                    size: full, insets: insets,
+                                    keyboardTop: typing && !keyboardRect.isEmpty ? keyboardRect.minY : nil)
+                }
                 KeyboardCatcher(active: $typing).frame(width: 0, height: 0)
             }
             .background(KeyboardFrameReader { keyboardRect = $0 })
@@ -261,6 +274,7 @@ struct SessionView: View {
         .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
+        .onChange(of: sidebar) { _, value in value.save(for: mac.id) }
         .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
         .onChange(of: pencilTablet) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
@@ -668,6 +682,7 @@ struct SessionView: View {
                     TouchControlOptions(mode: $touchMode)
                 }
                 Section("Keyboard") { KeyboardOptions() }
+                Section("Floating Sidebar") { SidebarOptions(preferences: $sidebar) }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {
                         Text("1×").tag(1)

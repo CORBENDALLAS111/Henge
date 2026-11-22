@@ -403,3 +403,9 @@ $(B)/test_modifier_ownership: ios/Henge/ModifierOwnership.swift tests/test_modif
 test-modifier-ownership: $(B)/test_modifier_ownership
 	$(B)/test_modifier_ownership
 .PHONY: test-modifier-ownership
+
+$(B)/test_sidebar: ios/Henge/SidebarPreferences.swift tests/test_sidebar.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-sidebar: $(B)/test_sidebar
+	$(B)/test_sidebar
+.PHONY: test-sidebar
