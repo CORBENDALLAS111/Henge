@@ -158,6 +158,7 @@ The optional diagnostic prints fixed allowlisted error domains/codes/counts and 
 
 The audit commit establishes this baseline. Follow-up commits record actual changes and their test results below; planned work is not counted as implemented.
 
+- Modifier ownership now separates physical keys, sticky screen keys and individual shortcut invocations. Last-owner release prevents a screen shortcut from releasing a physically held modifier. One-shot consumption preserves explicitly locked screen modifiers; scene/session reset clears both. [ModifierOwnership.swift](../ios/Henge/ModifierOwnership.swift), Input.swift and Hardware.swift are exercised by [test_modifier_ownership.swift](../tests/test_modifier_ownership.swift), which passes with Swift 6.2.3 on Linux; complete iOS SDK compilation remains a CI check.
 - No guest disk, Keychain, identity or auxiliary storage migration is part of this audit.
 - Existing virtual USB descriptors and snapshot ABI are preserved by the intended host-side input/sidebar changes.
 - A virtual Touch Bar is deferred: no working supported guest-wide Touch Bar render/input export exists in this tree. AppKit's NSTouchBar API for an app's own UI is not a system-wide remote bridge. Static pretend Touch Bar controls would not satisfy the requirement.

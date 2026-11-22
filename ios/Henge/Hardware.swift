@@ -108,13 +108,17 @@ enum HardwareKeys {
                 continue
             }
             let usage = UInt8(raw)
-            henge_vm_key_hid(usage, down ? 1 : 0)
+            if let code = ModifierOwnership.code(forHID: usage) {
+                GuestModifiers.set(code, owner: .physical, down: down)
+            } else {
+                henge_vm_key_hid(usage, down ? 1 : 0)
+            }
             if usage < 0xe0 { lastKey = CACurrentMediaTime() }
             if down {
                 held.insert(usage)
             } else {
                 held.remove(usage)
-                if usage < 0xe0 { StickyKeys.shared.releaseAll() } // one key after a tap on ⌃, ⌥ or ⌘
+                if usage < 0xe0 { StickyKeys.shared.releaseOneShot() }
             }
         }
         return rest
@@ -123,7 +127,8 @@ enum HardwareKeys {
     /// iPadOS can keep a key's release when it takes over, as it does for ⌘-Tab: the Mac must not
     /// go on thinking the key is down.
     static func releaseAll() {
-        for usage in held { henge_vm_key_hid(usage, 0) }
+        for usage in held where usage < 0xe0 { henge_vm_key_hid(usage, 0) }
+        GuestModifiers.release(.physical)
         held.removeAll()
     }
 }
@@ -307,7 +312,7 @@ final class HardwareMouse {
             HengeLog.log("input", "physical mouse button: raw=\(physicalButton) guest=\(guestButton) \(pressed ? "down" : "up")")
         }
         henge_vm_mouse_button(guestButton, pressed ? 1 : 0)
-        if !pressed { StickyKeys.shared.releaseAll() }
+        if !pressed { StickyKeys.shared.releaseAfterPointer() }
     }
 
     /// GameController puts vertical motion on the first axis and horizontal on the second.

@@ -102,13 +102,13 @@ struct KeyboardCatcher: UIViewRepresentable {
         func insertText(_ text: String) {
             guard !HardwareKeys.keyJustPressed else { return }
             for c in text { Keys.type(c) }
-            StickyKeys.shared.releaseAll()
+            StickyKeys.shared.releaseOneShot()
         }
 
         func deleteBackward() {
             guard !HardwareKeys.keyJustPressed else { return }
             Keys.press(Keys.backspace)
-            StickyKeys.shared.releaseAll()
+            StickyKeys.shared.releaseOneShot()
         }
     }
 }
@@ -143,17 +143,15 @@ enum Keys {
     ]
 
     static func press(_ code: UInt16, shifted: Bool = false) {
-        if shifted { henge_vm_key(shift, 1) }
-        henge_vm_key(code, 1)
-        henge_vm_key(code, 0)
-        if shifted { henge_vm_key(shift, 0) }
+        GuestModifiers.withHeld(shifted ? [shift] : []) {
+            henge_vm_key(code, 1)
+            henge_vm_key(code, 0)
+        }
     }
 
     /// A letter (or space) with a modifier held.
     static func chord(_ modifier: UInt16, _ c: Character) {
-        henge_vm_key(modifier, 1)
-        type(c)
-        henge_vm_key(modifier, 0)
+        GuestModifiers.withHeld([modifier]) { type(c) }
     }
 
     /// One character at a time, for what the Mac has to keep up with.
@@ -172,43 +170,66 @@ enum Keys {
     }
 }
 
-/// ⌃, ⌥ and ⌘ stay down from a tap until the next key or click, so a shortcut takes one finger.
+/// All modifier-producing host paths share one ownership table, on the UI
+/// thread. Shortcut owners are unique so nested shifted typing is safe too.
+enum GuestModifiers {
+    private static var ownership = ModifierOwnership()
+    static func set(_ code: UInt16, owner: ModifierOwnership.Owner, down: Bool) {
+        if let event = ownership.set(code, owner: owner, down: down) { send(event) }
+    }
+    static func release(_ owner: ModifierOwnership.Owner) {
+        for event in ownership.release(owner) { send(event) }
+    }
+    static func withHeld(_ codes: [UInt16], perform: () -> Void) {
+        let owner = ModifierOwnership.Owner.shortcut(UUID())
+        for code in codes { set(code, owner: owner, down: true) }
+        defer { release(owner) }
+        perform()
+    }
+    private static func send(_ event: ModifierOwnership.Transition) {
+        henge_vm_key(event.code, event.down ? 1 : 0)
+    }
+}
+
+/// Modifiers stay down until the next key/click, or until unlocked.
 final class StickyKeys: ObservableObject {
     static let shared = StickyKeys()
-    @Published private(set) var down: Set<UInt16> = []
+    @Published private(set) var state = StickyModifierState()
+    var down: Set<UInt16> { state.down }
+    var locked: Set<UInt16> { state.locked }
 
     private var revision: UInt64 = 0
 
     func toggle(_ code: UInt16) {
+        update { $0.toggle(code) }
+    }
+    func toggleLock(_ code: UInt16) { update { $0.toggleLock(code) } }
+
+    private func update(_ change: (inout StickyModifierState) -> Void) {
         revision &+= 1
-        if down.contains(code) {
-            henge_vm_key(code, 0)
-            down.remove(code)
-        } else {
-            henge_vm_key(code, 1)
-            down.insert(code)
-        }
+        let before = state.down
+        var next = state
+        change(&next)
+        for code in before.subtracting(next.down).sorted() { GuestModifiers.set(code, owner: .sticky, down: false) }
+        for code in next.down.subtracting(before).sorted() { GuestModifiers.set(code, owner: .sticky, down: true) }
+        state = next
     }
 
     /// Pointer reports may still be queued when the finger lifts. Keep a
     /// sticky modifier until the click has actually reached the guest.
     func releaseAfterPointer() {
-        guard !down.isEmpty else { return }
+        guard !down.subtracting(locked).isEmpty else { return }
         let expected = revision, deadline = ProcessInfo.processInfo.systemUptime + 1
         func check() {
             guard revision == expected else { return }
-            if henge_vm_pen_idle() != 0 || ProcessInfo.processInfo.systemUptime >= deadline { releaseAll() }
+            if henge_vm_pen_idle() != 0 || ProcessInfo.processInfo.systemUptime >= deadline { releaseOneShot() }
             else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { check() } }
         }
         check()
     }
 
-    func releaseAll() {
-        revision &+= 1
-        guard !down.isEmpty else { return }
-        for code in down { henge_vm_key(code, 0) }
-        down.removeAll()
-    }
+    func releaseOneShot() { update { $0.releaseOneShot() } }
+    func releaseAll() { update { $0.releaseAll() } }
 }
 
 /// The keys an on-screen keyboard doesn't have, in the slot above it.
@@ -281,7 +302,7 @@ private struct HeldKey: View {
                     .onEnded { _ in
                         down = false
                         henge_vm_key(code, 0)
-                        StickyKeys.shared.releaseAll()
+                        StickyKeys.shared.releaseOneShot()
                     }
             )
             .accessibilityLabel(label)

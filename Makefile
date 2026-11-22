@@ -397,3 +397,9 @@ $(B)/test_pvg_retry: tests/test_pvg_retry.c devices/pvg_retry.h | $(B)
 test-pvg-retry: $(B)/test_pvg_retry
 	$(B)/test_pvg_retry
 .PHONY: test-pvg-retry
+
+$(B)/test_modifier_ownership: ios/Henge/ModifierOwnership.swift tests/test_modifier_ownership.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-modifier-ownership: $(B)/test_modifier_ownership
+	$(B)/test_modifier_ownership
+.PHONY: test-modifier-ownership
