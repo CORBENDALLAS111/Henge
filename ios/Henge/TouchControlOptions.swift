@@ -3,6 +3,7 @@ import SwiftUI
 struct TouchControlOptions: View {
     @Binding var mode: String
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
+    @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
     var body: some View {
         Picker("Control method", selection: $mode) {
             Text("Trackpad").tag("trackpad")
@@ -19,6 +20,11 @@ struct TouchControlOptions: View {
                  : "Move one finger to drag. Use two fingers to scroll, or enable one-finger scrolling above.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
+        Toggle("Pencil as graphics tablet", isOn: $pencilTablet)
+        Text(pencilTablet
+             ? "The tip starts a stroke immediately. Pressure, tilt, orientation and supported Pencil Pro barrel roll go to the Mac's pen device. Double-tap and squeeze follow your Pencil settings."
+             : "Pencil taps click; hold still then lift to double-click. Move to drag. Enable graphics tablet mode for drawing and pressure from the start of a stroke.")
+            .font(.footnote).foregroundStyle(.secondary)
         NavigationLink("Gestures & Apple Pencil") { TouchGestureGuide() }
     }
 }

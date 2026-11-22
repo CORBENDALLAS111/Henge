@@ -56,6 +56,18 @@ import CoreGraphics
         g.begin(p, tool: .pencil, time: 29.4, scrollFingerSwipes: true)
         precondition(g.move(moved, time: 29.45) == [.down(p), .move(moved)])
         g.reset()
+        // Tablet mode sends actual contact immediately, including a stationary
+        // dot/pressure change; it must never synthesize desktop double-clicks.
+        precondition(g.begin(p, tool: .pencil, time: 29.6, pencilTablet: true) == [.down(p)])
+        precondition(g.move(p, time: 29.61) == [.move(p)])
+        precondition(g.move(jitter, time: 29.62) == [.move(jitter)])
+        precondition(g.hold(time: 30.3).isEmpty)
+        precondition(g.end(p, time: 30.4) == [.move(p), .up(p)])
+        precondition(g.begin(p, tool: .pencil, time: 31, pencilTablet: true) == [.down(p)])
+        g.reset()
+        precondition(g.end(p, time: 31.1).isEmpty, "cancelled tablet stroke never recreates contact")
+        precondition(g.begin(p, tool: .finger, time: 32, pencilTablet: true).isEmpty)
+        precondition(g.end(p, time: 32.1) == [.click(p, count: 1, secondary: false)], "tablet mode changes Pencil only")
         var multi = DirectMultiTouchGate()
         multi.begin(count: 2, time: 30)
         precondition(!multi.move(distance: 0, count: 2) && !multi.forwarding)

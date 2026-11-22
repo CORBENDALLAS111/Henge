@@ -1126,7 +1126,7 @@ static void pen_cancel_locked(HvXhci *x) {
     x->pen_mouse_state = 0;
     if (x->pen_mouse_delivered) hv_pen_mouse_report(x->pen_reports[x->pen_tail++], 0);
     if (x->pen_state[1] & HV_PEN_RANGE) {
-        x->pen_state[1] &= HV_PEN_RANGE | HV_PEN_INVERT;
+        x->pen_state[1] &= HV_PEN_RANGE | HV_PEN_REPORT_INVERT;
         x->pen_state[6] = x->pen_state[7] = 0;
         memcpy(x->pen_reports[x->pen_tail++], x->pen_state, HV_PEN_REPORT_LEN);
         x->pen_state[1] = 0;
@@ -1155,11 +1155,11 @@ void hv_xhci_pen_cancel(HvXhci *x) {
 
 /* All reports share one queue, so future hover samples cannot overtake a
    desktop click. Only same-kind, same-state digitizer motion is coalesced. */
-static int pen_enqueue_locked(HvXhci *x, const uint8_t *sample) {
+static int pen_enqueue_locked(HvXhci *x, const uint8_t *sample, int drawing) {
     uint32_t count = x->pen_tail - x->pen_head;
     unsigned last = count ? hv_pen_report_key(x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS]) : hv_pen_report_key(x->pen_delivered_state);
     unsigned before = count > 1 ? hv_pen_report_key(x->pen_reports[(x->pen_tail - 2) % HV_PEN_REPORTS]) : hv_pen_report_key(x->pen_delivered_state);
-    if (sample[0] == HV_PEN_REPORT_ID && count && last == hv_pen_report_key(sample) && before == last) {
+    if ((!drawing || count >= HV_PEN_REPORTS - 4) && sample[0] == HV_PEN_REPORT_ID && count && last == hv_pen_report_key(sample) && before == last) {
         memcpy(x->pen_reports[(x->pen_tail - 1) % HV_PEN_REPORTS], sample, HV_PEN_REPORT_LEN);
     } else if (count == HV_PEN_REPORTS) {
         pen_cancel_locked(x);
@@ -1192,16 +1192,16 @@ int hv_xhci_pen(HvXhci *x, int px, int py, int pressure, int tilt_x, int tilt_y,
             /* Position in hover first. Do not send a digitizer contact as well:
                this click belongs exclusively to the standard Mouse collection. */
             hv_pen_report(sample, px, py, 0, tilt_x, tilt_y, twist, flags & (HV_PEN_RANGE | HV_PEN_INVERT));
-            result = pen_enqueue_locked(x, sample);
+            result = pen_enqueue_locked(x, sample, 0);
             if (!result) memcpy(x->pen_state, sample, HV_PEN_REPORT_LEN);
         }
         if (!result) {
             hv_pen_mouse_report(sample, buttons);
-            result = pen_enqueue_locked(x, sample);
+            result = pen_enqueue_locked(x, sample, 0);
             if (!result) x->pen_mouse_state = buttons;
         }
     } else {
-        result = pen_enqueue_locked(x, sample);
+        result = pen_enqueue_locked(x, sample, flags & HV_PEN_DRAWING);
         if (!result) memcpy(x->pen_state, sample, HV_PEN_REPORT_LEN);
     }
     pthread_mutex_unlock(&x->mu);

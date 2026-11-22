@@ -12,10 +12,11 @@ struct DirectTouchSurface: UIViewRepresentable {
     let isActive: Bool
     var directFingers = true
     var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
+    var pencilTablet = true
     var imageFrame: CGRect? = nil
     func makeUIView(context: Context) -> Surface { Surface() }
     func updateUIView(_ view: Surface, context: Context) {
-        view.setActive(isActive, directFingers: directFingers, oneFingerScrolling: oneFingerScrolling)
+        view.setActive(isActive, directFingers: directFingers, oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet)
         view.setImageFrame(imageFrame)
     }
     static func dismantleUIView(_ view: Surface, coordinator: ()) { view.reset() }
@@ -24,6 +25,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var activeInput = false
         private var directFingers = true
         private var oneFingerScrolling = false
+        private var pencilTablet = true
         private var scroll = OneFingerScroll()
         private var proximity = PencilProximity()
         private var displayFrame: CGRect?
@@ -93,10 +95,11 @@ struct DirectTouchSurface: UIViewRepresentable {
             setNeedsLayout()
         }
         private var usable: Bool { activeInput && !HardwareMouse.shared.hasMouse && henge_vm_pen_ready() != 0 }
-        func setActive(_ active: Bool, directFingers: Bool, oneFingerScrolling: Bool) {
-            if !active || self.directFingers != directFingers || self.oneFingerScrolling != oneFingerScrolling { reset() }
+        func setActive(_ active: Bool, directFingers: Bool, oneFingerScrolling: Bool, pencilTablet: Bool) {
+            if !active || self.directFingers != directFingers || self.oneFingerScrolling != oneFingerScrolling || self.pencilTablet != pencilTablet { reset() }
             self.directFingers = directFingers
             self.oneFingerScrolling = oneFingerScrolling
+            self.pencilTablet = pencilTablet
             gestures.allowsTouchscreenClicks = !directFingers
             activeInput = active
             isUserInteractionEnabled = active
@@ -161,7 +164,8 @@ struct DirectTouchSurface: UIViewRepresentable {
             if #available(iOS 17.5, *) { roll = touch.rollAngle }
             let pressure = touch.maximumPossibleForce > 0 ? touch.force / touch.maximumPossibleForce : 1
             send(point, pressure: down ? pressure : 0, altitude: touch.altitudeAngle,
-                 azimuth: touch.azimuthAngle(in: self), roll: roll, flags: 4 | (down ? 1 : 0) | (eraser ? 8 : 0))
+                 azimuth: touch.azimuthAngle(in: self), roll: roll,
+                 flags: 4 | (down ? 1 : 0) | (eraser ? 8 : 0) | (down && pencilTablet ? Int32(HENGE_PEN_DRAWING) : 0))
         }
         private func showTouch(_ point: CGPoint?) {
             CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -234,8 +238,9 @@ struct DirectTouchSurface: UIViewRepresentable {
                 primary = pen
                 proximity.beginContact(); setPencilPresent(true)
                 startPoint = pen.preciseLocation(in: self)
-                classifier.begin(startPoint, tool: .pencil, time: pen.timestamp)
-                pencil(pen, down: false)
+                let actions = classifier.begin(startPoint, tool: .pencil, time: pen.timestamp, pencilTablet: pencilTablet)
+                if pencilTablet { perform(actions, pencilTouch: pen) }
+                else { pencil(pen, down: false) }
                 return
             }
             guard primary?.type != .pencil, !proximity.isHovering else { return } // palm rejection

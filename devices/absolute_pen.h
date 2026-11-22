@@ -17,19 +17,25 @@
 #define HV_PEN_DESKTOP_UP 128
 #define HV_PEN_DESKTOP_AT_CURSOR 256 /* trackpad click: do not reposition */
 #define HV_PEN_DESKTOP_MASK (HV_PEN_DESKTOP_LEFT | HV_PEN_DESKTOP_RIGHT | HV_PEN_DESKTOP_UP)
+#define HV_PEN_DRAWING 512 /* retain stroke geometry with bounded queue headroom */
 #define HV_PEN_TIP 1
 #define HV_PEN_BARREL 2
 #define HV_PEN_RANGE 4
 #define HV_PEN_INVERT 8
 #define HV_PEN_PRIMARY 16 /* mirror tip into Button 1 for collection-dispatch drivers */
+#define HV_PEN_REPORT_ERASER 8 /* contact switch in the HID report, not input flags */
+#define HV_PEN_REPORT_INVERT 32 /* eraser proximity, independent of tip contact */
 static const uint8_t hv_pen_descriptor[] = {
     0x05,0x0d, 0x09,0x02, 0xa1,0x01, 0x85,HV_PEN_REPORT_ID, 0x09,0x20, 0xa1,0x00,
-    0x09,0x42, 0x09,0x44, 0x09,0x32, 0x09,0x3c,
+    0x09,0x42, 0x09,0x44, 0x09,0x32, 0x09,0x45,
     0x15,0x00, 0x25,0x01, 0x75,0x01, 0x95,0x04, 0x81,0x02,
     /* Tip Switch describes digitizer contact. Collection dispatch keeps it
        separate from ButtonMask, so also advertise the primary desktop button. */
     0x05,0x09, 0x09,0x01, 0x75,0x01, 0x95,0x01, 0x81,0x02,
-    0x75,0x03, 0x95,0x01, 0x81,0x03,
+    /* Keep Invert after Eraser: the legacy macOS driver otherwise lets an
+       inactive eraser switch overwrite the inverted tool's hover state. */
+    0x05,0x0d, 0x09,0x3c, 0x75,0x01, 0x95,0x01, 0x81,0x02,
+    0x75,0x02, 0x95,0x01, 0x81,0x03,
     0x05,0x01, 0x09,0x30, 0x09,0x31,
     0x15,0x00, 0x26,0xff,0x7f, 0x35,0x00, 0x46,0xff,0x7f,
     0x75,0x10, 0x95,0x02, 0x81,0x02,
@@ -59,7 +65,10 @@ static inline void hv_pen_report(uint8_t *r, int x, int y, int pressure, int til
     r++;
     flags &= 15;
     if (!(flags & HV_PEN_RANGE)) flags = 0;
-    r[0] = (uint8_t)(flags | (flags & HV_PEN_TIP ? HV_PEN_PRIMARY : 0));
+    r[0] = (uint8_t)((flags & (HV_PEN_TIP | HV_PEN_BARREL | HV_PEN_RANGE)) |
+        (flags & HV_PEN_TIP ? HV_PEN_PRIMARY : 0) |
+        (flags & HV_PEN_INVERT ? HV_PEN_REPORT_INVERT |
+            (flags & HV_PEN_TIP ? HV_PEN_REPORT_ERASER : 0) : 0));
     hv_pen_u16(r + 1, hv_pen_clamp(x, 0, 32767));
     hv_pen_u16(r + 3, hv_pen_clamp(y, 0, 32767));
     hv_pen_u16(r + 5, flags & HV_PEN_TIP ? hv_pen_clamp(pressure, 1, 4095) : 0);

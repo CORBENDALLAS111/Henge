@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TouchGestureGuide: View {
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
+    @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
     var body: some View {
         Form {
             Section("Direct Touch") {
@@ -19,10 +20,12 @@ struct TouchGestureGuide: View {
             }
             Section("Apple Pencil") {
                 LabeledContent("Hover", value: "Move the tip above the screen")
-                LabeledContent("Click", value: "Touch and lift")
-                LabeledContent("Double-click", value: "Hold still briefly, then lift")
+                LabeledContent("Tip", value: pencilTablet ? "Begin a stroke immediately" : "Touch and lift to click")
+                if !pencilTablet { LabeledContent("Double-click", value: "Hold still briefly, then lift") }
                 LabeledContent("Drag or select", value: "Touch and move")
-                Text("Hold the tip still for about half a second, then lift to double-click. Moving before lifting starts a drag instead. Pressure and tilt are sent while dragging; supported Pencil Pro hardware also sends barrel roll.")
+                Text(pencilTablet
+                     ? "Graphics tablet mode sends contact and pressure from the first sample, including stationary dots and tiny strokes. Pressure, tilt and Pencil Pro barrel roll are sent to the Mac's pen device. Drawing apps must support tablet input. Change this mode in Touch Controls."
+                     : "Hold the tip still for about half a second, then lift to double-click. Moving before lifting starts a drag instead. Enable graphics tablet mode in Touch Controls for drawing.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Text("Barrel double-tap and Pencil Pro squeeze follow your Pencil preferences in the device's Settings. Eraser actions switch tools; palette actions open a context menu at the hovered point. Hover needs a compatible iPad and Pencil.")
                     .font(.footnote).foregroundStyle(.secondary)

@@ -20,8 +20,19 @@ static IOReturn (*handleReport)(IOHIDUserDeviceRef, const uint8_t *, CFIndex);
 static int left_down, left_up, right_down, right_up;
 static CGPoint target;
 static int wrong_position;
+static int tablet_points, eraser_proximity;
+static double max_pressure, max_tilt, max_rotation;
 static CGEventRef observe(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *ctx) {
     (void)proxy; (void)ctx;
+    if (type==kCGEventTabletProximity && CGEventGetIntegerValueField(event,kCGTabletProximityEventEnterProximity) &&
+        CGEventGetIntegerValueField(event,kCGTabletProximityEventPointerType)==3) eraser_proximity++;
+    double pressure=CGEventGetDoubleValueField(event,kCGTabletEventPointPressure);
+    if (pressure>0) {
+        tablet_points++;
+        max_pressure=fmax(max_pressure,pressure);
+        max_tilt=fmax(max_tilt,fabs(CGEventGetDoubleValueField(event,kCGTabletEventTiltX)));
+        max_rotation=fmax(max_rotation,fabs(CGEventGetDoubleValueField(event,kCGTabletEventRotation)));
+    }
     if (type==kCGEventLeftMouseDown) left_down++;
     if (type==kCGEventLeftMouseUp) left_up++;
     if (type==kCGEventRightMouseDown) right_down++;
@@ -43,7 +54,8 @@ int main(void) { @autoreleasepool {
     handleReport=dlsym(RTLD_DEFAULT,"IOHIDUserDeviceHandleReport");
     if(!createDevice || !handleReport) { puts("SKIP: runner does not expose virtual HID test APIs"); return 77; }
     CFMachPortRef tap=CGEventTapCreate(kCGHIDEventTap,kCGHeadInsertEventTap,kCGEventTapOptionListenOnly,
-        CGEventMaskBit(kCGEventLeftMouseDown)|CGEventMaskBit(kCGEventLeftMouseUp)|CGEventMaskBit(kCGEventRightMouseDown)|CGEventMaskBit(kCGEventRightMouseUp),observe,NULL);
+        CGEventMaskBit(kCGEventLeftMouseDown)|CGEventMaskBit(kCGEventLeftMouseUp)|CGEventMaskBit(kCGEventRightMouseDown)|CGEventMaskBit(kCGEventRightMouseUp)|
+        CGEventMaskBit(kCGEventLeftMouseDragged)|CGEventMaskBit(kCGEventTabletPointer)|CGEventMaskBit(kCGEventTabletProximity),observe,NULL);
     if(!tap) { puts("SKIP: runner does not allow a desktop HID event tap (real-device acceptance remains required)"); return 77; }
     NSDictionary *properties=@{
         @kIOHIDReportDescriptorKey:[NSData dataWithBytes:hv_pen_descriptor length:sizeof hv_pen_descriptor],
@@ -64,6 +76,21 @@ int main(void) { @autoreleasepool {
     mouse(device,2); mouse(device,0); pump(0.3);
     fprintf(stderr,"desktop HID: left=%d/%d right=%d/%d wrong-position=%d\n",left_down,left_up,right_down,right_up,wrong_position);
     assert(left_down==2 && left_up==2 && right_down==1 && right_up==1 && !wrong_position);
+    // Exercise the production descriptor through the host's real tablet driver.
+    for(int i=0;i<4;i++) {
+        hv_pen_report(r,16384+i*100,16384,1000+i*900,3000,-4500,9000,HV_PEN_RANGE|HV_PEN_TIP);
+        assert(handleReport(device,r,sizeof r)==kIOReturnSuccess); pump(0.09);
+    }
+    hv_pen_report(r,16684,16384,0,0,0,0,HV_PEN_RANGE);
+    assert(handleReport(device,r,sizeof r)==kIOReturnSuccess); pump(0.09);
+    hv_pen_report(r,16684,16384,0,0,0,0,0);
+    assert(handleReport(device,r,sizeof r)==kIOReturnSuccess); pump(0.09);
+    hv_pen_report(r,16684,16384,0,0,0,0,HV_PEN_RANGE|HV_PEN_INVERT);
+    assert(handleReport(device,r,sizeof r)==kIOReturnSuccess); pump(0.2);
+    fprintf(stderr,"tablet HID: points=%d pressure=%g tilt=%g rotation=%g eraser=%d\n",tablet_points,max_pressure,max_tilt,max_rotation,eraser_proximity);
+    assert(tablet_points && max_pressure>0 && max_tilt>0 && max_rotation>0 && eraser_proximity);
+    hv_pen_report(r,16684,16384,0,0,0,0,0);
+    assert(handleReport(device,r,sizeof r)==kIOReturnSuccess); pump(0.09);
     CFRunLoopRemoveSource(CFRunLoopGetCurrent(),source,kCFRunLoopDefaultMode);
     CFRelease(source); CFRelease(tap); CFRelease(device);
     puts("PASS: actual macOS HID driver emitted stationary desktop left-double and secondary click edges");

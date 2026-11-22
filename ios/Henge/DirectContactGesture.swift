@@ -22,13 +22,21 @@ struct DirectContactGesture {
     private var scrollSwipes = false
     static let scrollKey = "henge.touch.oneFingerScrolling"
     static let defaultOneFingerScrolling = true
+    static let pencilTabletKey = "henge.pencil.graphicsTablet"
     static let dragDelay: TimeInterval = 0.22
     static let contextDelay: TimeInterval = 0.55
     static let pencilDoubleDelay: TimeInterval = 0.45
 
-    mutating func begin(_ point: CGPoint, tool: Tool, time: TimeInterval, scrollFingerSwipes: Bool = false) {
+    @discardableResult
+    mutating func begin(_ point: CGPoint, tool: Tool, time: TimeInterval, scrollFingerSwipes: Bool = false,
+                        pencilTablet: Bool = false) -> [Action] {
         self.tool = tool; origin = point; began = time; phase = .pending
         scrollSwipes = scrollFingerSwipes && tool == .finger
+        if pencilTablet && tool == .pencil {
+            phase = .dragging
+            return [.down(point)]
+        }
+        return []
     }
     mutating func move(_ point: CGPoint, time: TimeInterval? = nil) -> [Action] {
         guard point.x.isFinite, point.y.isFinite else { return [] }

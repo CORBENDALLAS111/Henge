@@ -188,6 +188,28 @@ static void test_scroll_trackpad_queue(void) {
     pthread_mutex_destroy(&x->mu); free(x);
 }
 
+static void test_drawing_samples(void) {
+    HvXhci *x=hv_xhci_create(NULL,NULL); assert(x);
+    atomic_store(&x->pen_ready,1);
+    for(int i=0;i<60;i++) {
+        assert(!hv_xhci_pen(x,1000+i,2000+i*i,100+i*50,3000,-4500,i*100,HV_PEN_RANGE|HV_PEN_TIP|HV_PEN_DRAWING));
+    }
+    assert(x->pen_tail-x->pen_head==60);
+    for(int i=0;i<60;i++) {
+        const uint8_t *r=x->pen_reports[i];
+        assert(u16(r+2)==(unsigned)(1000+i) && u16(r+4)==(unsigned)(2000+i*i));
+        assert(u16(r+6)==(unsigned)(100+i*50) && u16(r+12)==(unsigned)(i*100));
+    }
+    for(int i=60;i<1000;i++) assert(!hv_xhci_pen(x,2000+i,3000,2000,0,0,9000,HV_PEN_RANGE|HV_PEN_TIP|HV_PEN_DRAWING));
+    assert(x->pen_tail-x->pen_head==HV_PEN_REPORTS-4);
+    assert(!hv_xhci_pen(x,2999,3000,0,0,0,9000,HV_PEN_RANGE));
+    assert(!hv_xhci_pen(x,2999,3000,0,0,0,9000,0));
+    assert(x->pen_tail-x->pen_head==HV_PEN_REPORTS-2 && !x->pen_overflows);
+    assert(x->pen_reports[(x->pen_tail-2)%HV_PEN_REPORTS][1]==HV_PEN_RANGE);
+    assert(x->pen_reports[(x->pen_tail-1)%HV_PEN_REPORTS][1]==0);
+    pthread_mutex_destroy(&x->mu);free(x);
+}
+
 int main(void) {
     HvXhci *x = hv_xhci_create(NULL, NULL); assert(x);
     assert(!hv_xhci_pen_ready(x) && hv_xhci_pen(x, 1, 1, 1, 0, 0, 0, 5) == -1);
@@ -294,11 +316,25 @@ int main(void) {
     uint8_t encoded[HV_PEN_REPORT_LEN]; uint8_t *sample = encoded + 1; hv_pen_report(encoded, 40000, -10, 9000, -10000, 10000, 40000, 15);
     assert(u16(sample + 1) == 32767 && u16(sample + 3) == 0 && u16(sample + 5) == 4095);
     assert((int16_t)u16(sample + 7) == -9000 && (int16_t)u16(sample + 9) == 9000 && u16(sample + 11) == 35999);
+    assert((sample[0] & (HV_PEN_REPORT_INVERT | HV_PEN_REPORT_ERASER)) ==
+           (HV_PEN_REPORT_INVERT | HV_PEN_REPORT_ERASER));
+    hv_pen_report(encoded, 100, 200, 1000, 3000, -4500, 9000, HV_PEN_RANGE | HV_PEN_INVERT);
+    assert(sample[0] == (HV_PEN_RANGE | HV_PEN_REPORT_INVERT) && !u16(sample + 5));
+    // Switching tools must not erase the queued release or leave an eraser
+    // contact behind after cancellation at the last delivered position.
+    atomic_store(&x->pen_ready,1);
+    hv_xhci_pen_cancel(x);
+    hv_pen_report(x->pen_delivered_state, 100, 200, 2000, 0, 0, 0, HV_PEN_RANGE | HV_PEN_INVERT | HV_PEN_TIP);
+    hv_xhci_pen_cancel(x);
+    assert(x->pen_tail-x->pen_head == 2);
+    assert(x->pen_reports[x->pen_head][1] == (HV_PEN_RANGE | HV_PEN_REPORT_INVERT));
+    assert(x->pen_reports[x->pen_head+1][1] == 0);
     reset(x); assert(!hv_xhci_pen_ready(x) && !x->pen_state[1] && x->pen_head == x->pen_tail);
     pthread_mutex_destroy(&x->mu); free(x);
     test_stationary_clicks();
     test_desktop_clicks();
     test_scroll_trackpad_queue();
+    test_drawing_samples();
     puts("PASS: independent USB mouse clicks at fixed XY, left double-click/right hold reports, hover-before-click, mouse cancellation/overflow, pen pressure/tilt, synchronized scroll coalescing/final release, interrupt service and reset");
     return 0;
 }

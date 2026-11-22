@@ -35,6 +35,7 @@ struct SessionView: View {
     @AppStorage("henge.display.brightness") private var screenBrightness = 1.0
     @AppStorage("henge.touch.mode") private var touchMode = "direct"
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
+    @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -130,7 +131,7 @@ struct SessionView: View {
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
                     if !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling,
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet,
                                            imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
                             .frame(width: layout.touch.width, height: layout.touch.height)
                             .position(x: layout.touch.midX, y: layout.touch.midY)
@@ -261,6 +262,7 @@ struct SessionView: View {
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
         .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
+        .onChange(of: pencilTablet) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
         .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in
@@ -500,6 +502,8 @@ struct SessionView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("Control method")
+        .buttonStyle(.plain)
+        .tint(.white)
         .accessibilityValue(direct ? "Direct Touch" : "Trackpad")
         .disabled(display.isExternal)
         .accessibilityHint(display.isExternal ? "The external display uses trackpad control" : direct ? "Switch to Trackpad" : "Switch to Direct Touch")

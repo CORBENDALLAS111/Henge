@@ -1,5 +1,36 @@
 # Experimental absolute touch and Apple Pencil
 
+## Graphics tablet mode
+
+**Settings / Details → Touch Controls → Pencil as graphics tablet** defaults on.
+Pencil tip-down now starts a pen stroke immediately; stationary dots, pressure
+changes and sub-slop movements are forwarded. Holding the tip does not synthesize
+a double-click in this mode. Disable the setting to retain desktop Pencil gestures.
+Switching mode cancels the current contact before changing policy.
+
+The existing pen channel carries 12-bit pressure, X/Y tilt and barrel rotation
+in hundredths of degrees, hover/proximity and the eraser tool. Coalesced UIKit
+samples are retained in order while the queue has room; near its bounded capacity
+motion coalesces with four slots reserved for contact release/proximity leave.
+The eraser descriptor now distinguishes its contact switch from inverted-tool
+hover; cancellation clears contact while retaining tool proximity until leave.
+The report size and USB endpoint stay the same. Cold boot after updating so
+macOS enumerates the revised descriptor.
+
+Apple Pencil double-tap/squeeze continue following system preferences between
+strokes: eraser actions switch tools and palette actions produce a guest context
+menu. Available force/hover/roll depends on the connected Pencil and iPad.
+macOS drawing apps must consume tablet events and enable pressure/tilt/rotation
+for the selected brush. This is a standard HID graphics tablet; it does not
+implement Apple's private Sidecar transport or its app-specific palettes.
+
+Portable tests cover immediate dots, tiny strokes, pressure/tilt/roll mapping,
+sixty retained curved-path samples, bounded backpressure, eraser hover/contact
+and cancellation. The optional real-macOS HID test also checks actual tablet
+pressure, tilt, rotation and eraser proximity when runner permissions permit it.
+A permission skip is not guest validation. Ventura/iPad/Pencil app acceptance
+still requires a real device.
+
 The previous safety build intentionally mapped the saved `direct` choice to
 Trackpad. This branch restores a separate Direct Touch surface over the Mac's
 display, using a new standard USB HID Pen/Stylus on xHCI port 3. It never steers
