@@ -44,6 +44,7 @@ struct SessionView: View {
     @AppStorage("henge.touch.mode") private var touchMode = "direct"
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
+    @AppStorage(DirectMultiTouchGate.contextTapKey) private var twoFingerContextTap = false
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -139,7 +140,7 @@ struct SessionView: View {
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
                     if !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet,
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet, twoFingerContextTap: twoFingerContextTap,
                                            imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
                             .frame(width: layout.touch.width, height: layout.touch.height)
                             .position(x: layout.touch.midX, y: layout.touch.midY)
@@ -277,6 +278,7 @@ struct SessionView: View {
         .onChange(of: sidebar) { _, value in value.save(for: mac.id) }
         .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
         .onChange(of: pencilTablet) { _ in resetPointerInput() }
+        .onChange(of: twoFingerContextTap) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
         .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in

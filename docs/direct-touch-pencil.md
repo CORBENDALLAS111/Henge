@@ -1,5 +1,19 @@
 # Experimental absolute touch and Apple Pencil
 
+## Optional two-finger context tap and sidebar
+
+Details / Settings → Touch Controls → **Two-finger tap for context menu** is
+off by default to preserve existing stationary-tap behavior. When enabled, a
+quick stationary pair right-clicks at its midpoint. A scroll, drag, third finger,
+long press, cancelled gesture, movement on lift or a touch outside the Mac image
+cannot finish as a context click. Moving pairs still use native guest gestures.
+
+Details → **Floating Sidebar** enables actual Mac modifier keys, Escape,
+keyboard visibility, Undo/Redo, Dock toggle and menu-bar focus. Tap a modifier
+for the next key/click or long-press it to Lock. Locks clear when the input
+session is hidden or loses ownership. Side/position/opacity/auto-hide are stored
+per VM; guest disks and saved device layouts do not change.
+
 ## Graphics tablet mode
 
 **Settings / Details → Touch Controls → Pencil as graphics tablet** defaults on.

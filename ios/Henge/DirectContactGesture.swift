@@ -27,6 +27,12 @@ struct DirectContactGesture {
     static let contextDelay: TimeInterval = 0.55
     static let pencilDoubleDelay: TimeInterval = 0.45
 
+    /// Joining a second finger must not turn an existing drag/scroll/context
+    /// action into a new click, even if the first finger returns to its origin.
+    func canJoinContextTap(at point: CGPoint) -> Bool {
+        phase == .pending && tool == .finger && hypot(point.x - origin.x, point.y - origin.y) < 8
+    }
+
     @discardableResult
     mutating func begin(_ point: CGPoint, tool: Tool, time: TimeInterval, scrollFingerSwipes: Bool = false,
                         pencilTablet: Bool = false) -> [Action] {
