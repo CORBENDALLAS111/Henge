@@ -21,7 +21,9 @@ static int call(const char *socket_path,const char *method,const char *path,cons
 typedef struct { const char *socket; char response[4096]; int code; } TargetClient;
 static void *follow_target(void *arg) {
     TargetClient *client=arg;
-    client->code=call(client->socket,"GET","/.henge/touch-target?since=0","",client->response);
+    // Instant Resume may restore an agent with a larger ID from another host
+    // process. A current request must still wake it, not wait for that counter.
+    client->code=call(client->socket,"GET","/.henge/touch-target?since=18446744073709551615","",client->response);
     return NULL;
 }
 int main(void) {

@@ -52,12 +52,14 @@ guest-private sharing transport. A long poll wakes on a new finger contact;
 there is no continuous accessibility-tree scan or screenshot analysis. Old
 helpers do not advertise this channel, so they introduce no query delay.
 
-The single-contact mailbox has monotonically increasing IDs, cancellation and a
+The single-contact mailbox has process-randomized, increasing IDs, cancellation and a
 120 ms lifetime. The UI does not block on guest networking: it briefly defers
 only an undecided swipe and replays the latest original motion sample after a
 reply or timeout. Stationary taps never wait. Once drag/scroll has begun, a late
 reply cannot change it. Scene loss, mode/layout changes, lift and multi-touch
-cancel the request. A second VM/session cannot reuse a previous response.
+cancel the request. The listener treats `since` as an identity, not a minimum
+counter, so a resumed agent from another host process can receive new work.
+A second VM/session cannot reuse a previous response.
 
 The AX worker is separate from clipboard/focus reporting, uses messaging
 timeouts and an 80 ms traversal budget. Under guest load it may miss the host

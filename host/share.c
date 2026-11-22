@@ -58,8 +58,15 @@ static pthread_mutex_t target_mu=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t target_cond=PTHREAD_COND_INITIALIZER;
 static HvTouchTarget target;
 static double target_agent_seen;
+static int target_seeded;
 void hv_share_set_target_enabled(int enabled) {
     pthread_mutex_lock(&target_mu);
+    if(enabled && !target_seeded) {
+        /* A restored agent can remember an ID from a previous host process.
+           Namespace new requests independently without changing snapshot ABI. */
+        arc4random_buf(&target.sequence,sizeof target.sequence);
+        target.sequence >>= 1; target_seeded=1;
+    }
     if(target.enabled != !!enabled) target_agent_seen=0;
     hv_target_enable(&target,enabled);
     pthread_cond_broadcast(&target_cond);
@@ -773,14 +780,14 @@ static int serve_henge(Conn *c, Request *r) {
         struct timespec until; clock_gettime(CLOCK_REALTIME,&until); until.tv_sec+=10;
         pthread_mutex_lock(&target_mu);
         if(target.enabled) target_agent_seen=focus_now();
-        while(target.enabled && (!target.active || target.active<=since || target.ready ||
+        while(target.enabled && (!target.active || target.active==since || target.ready ||
               focus_now()-target.requested>HV_TARGET_TIMEOUT)) {
             int rc=pthread_cond_timedwait(&target_cond,&target_mu,&until);
             if(rc) break;
         }
         int enabled=target.enabled;
         char text[100]; int n=0;
-        if(enabled && target.active>since && !target.ready && focus_now()-target.requested<=HV_TARGET_TIMEOUT)
+        if(enabled && target.active && target.active!=since && !target.ready && focus_now()-target.requested<=HV_TARGET_TIMEOUT)
             n=snprintf(text,sizeof text,"%llu %.9f %.9f",(unsigned long long)target.active,target.x,target.y);
         pthread_mutex_unlock(&target_mu);
         if(!enabled) return respond_empty(c,r,403,"Forbidden");
