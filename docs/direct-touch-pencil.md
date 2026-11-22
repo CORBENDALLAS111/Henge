@@ -72,10 +72,11 @@ the selected mode and the next action. An absent saved preference defaults to
 Direct Touch; explicit saved choices remain selected. External displays keep
 trackpad control and disable this button.
 
-### Optional one-finger scrolling
+### One-finger scrolling
 
-Enable **Settings or Details → Touch Controls → One-finger scrolling**. It
-starts off so the user's accepted drag behavior remains selected. With it on:
+Use **Settings or Details → Touch Controls → One-finger scrolling**. It
+defaults on when no preference has been saved. An explicit saved on/off choice
+is preserved. Turn it off to restore immediate one-finger dragging. With it on:
 
 - A quick swipe beyond the existing 10-point slop scrolls.
 - Pause at least 220 ms before moving to drag/select instead.
@@ -85,7 +86,12 @@ starts off so the user's accepted drag behavior remains selected. With it on:
 
 A classified swipe becomes two virtual Magic Trackpad contacts (IDs 8/9), not
 mouse-wheel ticks. Both contacts move in one frame at each UIKit sample's own
-timestamp. The dominant axis locks to prevent sideways drift. macOS supplies
+timestamp. A clearly dominant axis locks to prevent sideways drift; diagonal
+pans retain both axes. Scaling uses the displayed Mac image, including a zoomed
+or keyboard-shifted image, rather than the surrounding touch panel. Movement
+beyond the sensor edge is discarded so reversal responds immediately. A pause
+of at least 50 ms supplies a stationary frame before release; a continuing
+flick releases directly. macOS supplies
 acceleration, natural-scroll direction and momentum using its existing trackpad
 settings; this does not claim to duplicate the iPhone's exact deceleration curve.
 There is no additional host momentum generator to double the guest's inertia.
@@ -99,6 +105,12 @@ ordered, with the newest move and its original timestamp retained. Even a full
 edge-filled queue retains the final stop/empty state instead of silently dropping
 finger-up reports. Controller tests cover a thousand queued moves and release
 under backpressure, alongside the existing stationary click regressions.
+
+The follow-up's standalone Swift emitter/classifier tests pass on Swift 6.2.3
+in Swift 5 mode, including diagonal pans, edge reversal and pause/flick release.
+Account support/profile persistence tests and the 6,021-check software-identity
+suite also pass. These are source-level checks; physical iPad scroll feel and
+Apple Account authentication remain separate device acceptance checks.
 
 Select Trackpad if the guest does not accept the absolute device or positioning
 is incorrect. On an external display the iOS screen remains a trackpad.

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct TouchControlOptions: View {
     @Binding var mode: String
-    @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = false
+    @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     var body: some View {
         Picker("Control method", selection: $mode) {
             Text("Trackpad").tag("trackpad")

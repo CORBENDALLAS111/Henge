@@ -1,15 +1,16 @@
 import SwiftUI
 
 struct TouchGestureGuide: View {
+    @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     var body: some View {
         Form {
             Section("Direct Touch") {
                 LabeledContent("Click", value: "Tap once")
                 LabeledContent("Double-click", value: "Tap twice")
-                LabeledContent("Drag or select", value: "Touch and move")
+                LabeledContent("Drag or select", value: oneFingerScrolling ? "Pause briefly, then move" : "Touch and move")
                 LabeledContent("Context menu", value: "Hold still")
-                LabeledContent("Scroll", value: "Move two fingers")
-                Text("Optional one-finger scrolling is in Touch Controls. When enabled, swipe to scroll, or pause for about a quarter second before moving to drag. Keep holding still for the context menu. macOS supplies the scrolling direction and inertia; Pencil dragging is unchanged.")
+                LabeledContent("Scroll", value: oneFingerScrolling ? "Swipe with one finger" : "Move two fingers")
+                Text("Change one-finger scrolling in Touch Controls. When enabled, swipe to scroll, or pause for about a quarter second before moving to drag. Keep holding still for the context menu. Two-finger scrolling is also available. macOS supplies the scrolling direction and inertia; Pencil dragging is unchanged.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Text("Tapping with two fingers does not click in Direct Touch. Use a one-finger hold for the context menu. Tap the hand/trackpad icon in the session bar to switch control methods.")
                     .font(.footnote).foregroundStyle(.secondary)

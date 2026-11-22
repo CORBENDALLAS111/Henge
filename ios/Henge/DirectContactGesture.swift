@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// Desktop gesture classification in view points, before any guest button-down.
 /// A held Pencil produces a double-click only on lift, so it can still become a drag.
@@ -19,6 +21,7 @@ struct DirectContactGesture {
     private var began: TimeInterval = 0
     private var scrollSwipes = false
     static let scrollKey = "henge.touch.oneFingerScrolling"
+    static let defaultOneFingerScrolling = true
     static let dragDelay: TimeInterval = 0.22
     static let contextDelay: TimeInterval = 0.55
     static let pencilDoubleDelay: TimeInterval = 0.45

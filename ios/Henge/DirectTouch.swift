@@ -5,13 +5,13 @@ import UIKit
 enum TouchInputSafety {
     static let reset = Notification.Name("henge.input.reset")
     static let pencilPresence = Notification.Name("henge.input.pencilPresence")
-    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, move to drag, or hold still for a right-click. Two fingers scroll; a two-finger tap does not click. Optional one-finger scrolling: swipe to scroll, pause briefly then move to drag. Pencil: tap to click, move to drag, or hold still then lift to double-click. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
+    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, or hold still for a right-click. With one-finger scrolling enabled, swipe to scroll and pause briefly then move to drag. With it disabled, move to drag and use two fingers to scroll. A two-finger tap does not click. Pencil: tap to click, move to drag, or hold still then lift to double-click. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
 }
 
 struct DirectTouchSurface: UIViewRepresentable {
     let isActive: Bool
     var directFingers = true
-    var oneFingerScrolling = false
+    var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     var imageFrame: CGRect? = nil
     func makeUIView(context: Context) -> Surface { Surface() }
     func updateUIView(_ view: Surface, context: Context) {
@@ -193,8 +193,8 @@ struct DirectTouchSurface: UIViewRepresentable {
                     send(p, flags: range); contact = false
                 case .scrollBegin(let p, let time):
                     pendingDown?.cancel(); pendingDown = nil
-                    sendScroll(scroll.begin(p, size: bounds.size, time: time))
-                case .scroll(let p, let time): sendScroll(scroll.move(p, time: time))
+                    sendScroll(scroll.begin(scrollPoint(p), size: imageBounds.size, time: time))
+                case .scroll(let p, let time): sendScroll(scroll.move(scrollPoint(p), time: time))
                 case .scrollEnd(let time): sendScroll(scroll.end(time: time))
                 case .click(let p, let count, let secondary):
                     // Each complete pair remains in the USB queue, including fast double-clicks.
@@ -210,6 +210,9 @@ struct DirectTouchSurface: UIViewRepresentable {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
             }
+        }
+        private func scrollPoint(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: point.x - imageBounds.minX, y: point.y - imageBounds.minY)
         }
         private func beginMulti(_ touches: Set<UITouch>, event: UIEvent?) {
             multi = true
