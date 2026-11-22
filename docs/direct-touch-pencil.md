@@ -1,5 +1,17 @@
 # Experimental absolute touch and Apple Pencil
 
+## Scroll and drag together
+
+With one-finger scrolling on, a single swipe scrolls. To drag a window, icon or
+selection immediately, **tap once, then touch the same object again and move
+without lifting the second touch**. The second touch starts a drag after the
+normal movement threshold, even when moving immediately. Two stationary taps
+still send two clicks. The second touch must begin within 350 ms of the first
+tap's release and within 24 host points. Scene/mode/layout changes and
+multi-touch cancel this history. Pausing 220 ms before moving also permits drag;
+holding still for 550 ms keeps the existing context menu behavior. Pencil and
+Trackpad modes retain their existing drag policy.
+
 ## Optional two-finger context tap and sidebar
 
 Details / Settings → Touch Controls → **Two-finger tap for context menu** is

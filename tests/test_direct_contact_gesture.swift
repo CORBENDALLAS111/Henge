@@ -51,6 +51,7 @@ import CoreGraphics
         precondition(g.end(p, time: 28.6).isEmpty)
         g.begin(p, tool: .finger, time: 29, scrollFingerSwipes: true)
         precondition(g.end(jitter, time: 29.1) == [.click(p, count: 1, secondary: false)])
+        g.reset() // an independent swipe, not tap-then-drag
         g.begin(p, tool: .finger, time: 29.2, scrollFingerSwipes: true)
         precondition(g.end(moved, time: 29.25) == [.scrollBegin(p, time: 29.2), .scroll(moved, time: 29.25), .scrollEnd(time: 29.25)], "unsampled flick scrolls without clicking")
         g.begin(p, tool: .pencil, time: 29.4, scrollFingerSwipes: true)
@@ -111,6 +112,44 @@ import CoreGraphics
         precondition(!multi.secondaryTap(time: 110.1))
         multi.reset()
         precondition(!multi.secondaryTap(time: 110.1), "cancelled gesture cannot click")
+        // Scroll and desktop drag need distinct intents. Tap once, then put
+        // the finger back and move: this must drag even inside the scroll delay.
+        var drag = DirectContactGesture()
+        func tap(_ time: TimeInterval) {
+            drag.begin(p, tool: .finger, time: time, scrollFingerSwipes: true)
+            precondition(drag.end(p, time: time + 0.04) == [.click(p, count: 1, secondary: false)])
+        }
+        tap(120)
+        drag.begin(p, tool: .finger, time: 120.1, scrollFingerSwipes: true)
+        precondition(drag.move(jitter, time: 120.11).isEmpty)
+        precondition(drag.move(moved, time: 120.12) == [.down(p), .move(moved)], "tap-then-drag must beat one-finger scrolling")
+        precondition(drag.hold(time: 121).isEmpty)
+        precondition(drag.end(moved, time: 121.1) == [.move(moved), .up(moved)])
+        precondition(drag.end(moved, time: 121.2).isEmpty, "one drag release")
+        tap(122); tap(122.1) // two stationary clicks remain a desktop double-click
+        tap(123)
+        drag.begin(p, tool: .finger, time: 123.1, scrollFingerSwipes: true)
+        precondition(drag.end(moved, time: 123.12) == [.down(p), .move(moved), .up(moved)], "fast tap-drag with no move callback still releases")
+        tap(124)
+        drag.begin(p, tool: .finger, time: 124.5, scrollFingerSwipes: true)
+        precondition(drag.move(moved, time: 124.51) == [.scrollBegin(p, time: 124.5), .scroll(moved, time: 124.51)], "expired tap cannot capture the next scroll")
+        drag.reset(); tap(125)
+        drag.begin(CGPoint(x: 200, y: 200), tool: .finger, time: 125.1, scrollFingerSwipes: true)
+        precondition(drag.move(CGPoint(x: 225, y: 200), time: 125.12) == [.scrollBegin(CGPoint(x: 200, y: 200), time: 125.1), .scroll(CGPoint(x: 225, y: 200), time: 125.12)], "a tap elsewhere cannot arm drag")
+        drag.reset(); tap(126); drag.reset()
+        drag.begin(p, tool: .finger, time: 126.1, scrollFingerSwipes: true)
+        precondition(drag.move(moved, time: 126.12) == [.scrollBegin(p, time: 126.1), .scroll(moved, time: 126.12)], "mode/scene/multitouch cancellation clears tap history")
+        drag.reset(); tap(127)
+        drag.begin(p, tool: .pencil, time: 127.1, scrollFingerSwipes: true)
+        precondition(drag.end(p, time: 127.14) == [.click(p, count: 1, secondary: false)], "finger tap cannot change Pencil policy")
+        drag.begin(p, tool: .finger, time: 128, scrollFingerSwipes: true)
+        precondition(drag.end(p, time: .nan).isEmpty)
+        drag.reset(); tap(129)
+        drag.begin(p, tool: .finger, time: 129.1, scrollFingerSwipes: true)
+        precondition(drag.hold(time: 129.7) == [.click(p, count: 1, secondary: true)], "stationary second touch retains long-press context menu")
+        precondition(drag.end(p, time: 129.8).isEmpty)
+        drag.begin(p, tool: .finger, time: 129.9, scrollFingerSwipes: true)
+        precondition(drag.move(moved, time: 129.92) == [.scrollBegin(p, time: 129.9), .scroll(moved, time: 129.92)], "context menu cannot arm a later drag")
         print("PASS: finger/Pencil jitter, clicks, double-click, hold context menu, drag and cancellation")
     }
 }

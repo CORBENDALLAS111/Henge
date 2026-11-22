@@ -5,7 +5,7 @@ import UIKit
 enum TouchInputSafety {
     static let reset = Notification.Name("henge.input.reset")
     static let pencilPresence = Notification.Name("henge.input.pencilPresence")
-    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, or hold still for a right-click. With one-finger scrolling enabled, swipe to scroll and pause briefly then move to drag. With it disabled, move to drag and use two fingers to scroll. Two-finger context taps are optional in Touch Controls. Pencil: graphics tablet mode starts a stroke immediately; desktop mode supports clicks and drag. Supported Pencil input includes hover, pressure, tilt and barrel roll; double-tap and squeeze follow Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
+    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, or hold still for a right-click. With one-finger scrolling enabled, swipe to scroll. To drag, tap then immediately touch the same object again and move without lifting, or pause briefly before moving. With scrolling disabled, move to drag and use two fingers to scroll. Two-finger context taps are optional in Touch Controls. Pencil: graphics tablet mode starts a stroke immediately; desktop mode supports clicks and drag. Supported Pencil input includes hover, pressure, tilt and barrel roll; double-tap and squeeze follow Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
 }
 
 struct DirectTouchSurface: UIViewRepresentable {

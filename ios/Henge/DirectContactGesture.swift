@@ -20,12 +20,16 @@ struct DirectContactGesture {
     private var origin = CGPoint.zero
     private var began: TimeInterval = 0
     private var scrollSwipes = false
+    private var previousTap: (point: CGPoint, time: TimeInterval)?
+    private var tapDrag = false
     static let scrollKey = "henge.touch.oneFingerScrolling"
     static let defaultOneFingerScrolling = true
     static let pencilTabletKey = "henge.pencil.graphicsTablet"
     static let dragDelay: TimeInterval = 0.22
     static let contextDelay: TimeInterval = 0.55
     static let pencilDoubleDelay: TimeInterval = 0.45
+    static let tapDragInterval: TimeInterval = 0.35
+    static let tapDragDistance: CGFloat = 24
 
     /// Joining a second finger must not turn an existing drag/scroll/context
     /// action into a new click, even if the first finger returns to its origin.
@@ -38,6 +42,13 @@ struct DirectContactGesture {
                         pencilTablet: Bool = false) -> [Action] {
         self.tool = tool; origin = point; began = time; phase = .pending
         scrollSwipes = scrollFingerSwipes && tool == .finger
+        tapDrag = false
+        if scrollSwipes, let tap = previousTap, time.isFinite, time >= tap.time,
+           time - tap.time <= Self.tapDragInterval,
+           hypot(point.x - tap.point.x, point.y - tap.point.y) <= Self.tapDragDistance {
+            tapDrag = true
+        }
+        previousTap = nil
         if pencilTablet && tool == .pencil {
             phase = .dragging
             return [.down(point)]
@@ -51,7 +62,7 @@ struct DirectContactGesture {
         case .pending:
             let distance = hypot(point.x - origin.x, point.y - origin.y)
             guard distance >= (tool == .finger ? 10 : 4) else { return [] }
-            if scrollSwipes, let time, time.isFinite, time >= began, time - began < Self.dragDelay {
+            if scrollSwipes, !tapDrag, let time, time.isFinite, time >= began, time - began < Self.dragDelay {
                 phase = .scrolling
                 return [.scrollBegin(origin, time: began), .scroll(point, time: time)]
             }
@@ -63,17 +74,19 @@ struct DirectContactGesture {
         }
     }
     mutating func hold(time: TimeInterval) -> [Action] {
-        guard phase == .pending, tool == .finger, time - began >= Self.contextDelay else { return [] }
+        guard phase == .pending, tool == .finger, time.isFinite, time - began >= Self.contextDelay else { return [] }
         phase = .consumed
         return [.click(origin, count: 1, secondary: true)]
     }
     mutating func end(_ point: CGPoint, time: TimeInterval) -> [Action] {
-        defer { phase = .idle }
+        defer { phase = .idle; tapDrag = false }
         switch phase {
         case .pending:
+            guard point.x.isFinite, point.y.isFinite, time.isFinite, time >= began else { return [] }
             // A flick can end before UIKit supplies a move sample. It is not a
             // stationary tap and must not click or auto-open the keyboard.
             guard hypot(point.x - origin.x, point.y - origin.y) < (tool == .finger ? 10 : 4) else {
+                if tapDrag { return [.down(origin), .move(point), .up(point)] }
                 if scrollSwipes, time.isFinite, time >= began, time - began < Self.dragDelay {
                     return [.scrollBegin(origin, time: began), .scroll(point, time: time), .scrollEnd(time: time)]
                 }
@@ -81,6 +94,7 @@ struct DirectContactGesture {
             }
             // Minor touch-up jitter remains a click at touch-down.
             let duration = time - began
+            if scrollSwipes, duration < Self.contextDelay { previousTap = (origin, time) }
             return [.click(origin, count: tool == .pencil && duration >= Self.pencilDoubleDelay ? 2 : 1,
                            secondary: tool == .finger && duration >= Self.contextDelay)]
         case .dragging: return [.move(point), .up(point)]
@@ -88,5 +102,5 @@ struct DirectContactGesture {
         default: return []
         }
     }
-    mutating func reset() { phase = .idle }
+    mutating func reset() { phase = .idle; previousTap = nil; tapDrag = false }
 }

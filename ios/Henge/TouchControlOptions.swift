@@ -20,7 +20,7 @@ struct TouchControlOptions: View {
                 .font(.footnote).foregroundStyle(.secondary)
             Toggle("One-finger scrolling", isOn: $oneFingerScrolling)
             Text(oneFingerScrolling
-                 ? "Swipe to scroll. To drag, pause briefly before moving; keep holding still for a context menu. Scrolling follows the Mac's natural direction and inertia settings. Apple Pencil still drags directly."
+                 ? "Swipe to scroll. To drag immediately, tap, then touch the same object again and move without lifting. Or pause briefly before moving. Keep holding still for a context menu. Scrolling follows the Mac's natural direction and inertia settings. Apple Pencil still drags directly."
                  : "Move one finger to drag. Use two fingers to scroll, or enable one-finger scrolling above.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
