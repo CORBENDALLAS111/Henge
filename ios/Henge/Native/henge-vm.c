@@ -426,6 +426,10 @@ void henge_share_set_clipboard(const char *text) { hv_share_set_clipboard(text);
 char *henge_share_take_clipboard(void) { return hv_share_take_clipboard(); }
 void henge_share_set_focus_enabled(int enabled) { hv_share_set_focus_enabled(enabled); }
 int henge_share_focus(double bounds[4], double *age) { return hv_share_focus(bounds,age); }
+void henge_share_set_target_enabled(int enabled) { hv_share_set_target_enabled(enabled); }
+uint64_t henge_share_target_request(double x,double y) { return hv_share_target_request(x,y); }
+int henge_share_target_result(uint64_t id) { return hv_share_target_result(id); }
+void henge_share_target_cancel(uint64_t id) { hv_share_target_cancel(id); }
 long henge_share_agent_seen(void) { return hv_share_agent_seen(); }
 
 int henge_vm_display_pixels(uint32_t *width, uint32_t *height) {

@@ -48,7 +48,7 @@ IDR_SRC = $(wildcard third_party/idevicerestore/src/*.c)
 RESTORE_OBJ = $(patsubst third_party/%.c,$(RB)/%.o,$(IRECV_SRC) $(MUXD_SRC) $(IDR_SRC))
 
 # The helper that runs inside macOS on a virtual Mac (share.c serves it to the guest).
-$(B)/henge-agent: tools/henge-agent.m
+$(B)/henge-agent: tools/henge-agent.m tools/touch-target-policy.h host/touch_target.h
 	@mkdir -p $(B)
 	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit -framework ApplicationServices $< -o $@
 	codesign -f -s - $@
@@ -368,7 +368,7 @@ test-apple-account-support: $(B)/test_apple_account_support
 # Keyboard viewport is independent of UIKit; guest focus is a metadata-only HTTP channel.
 $(B)/test_keyboard_viewport: ios/Henge/KeyboardViewport.swift tests/test_keyboard_viewport.swift | $(B)
 	xcrun --sdk macosx swiftc $^ -o $@
-$(B)/test_input_focus: tests/test_input_focus.c host/share.c host/share.h host/input_focus.h | $(B)
+$(B)/test_input_focus: tests/test_input_focus.c host/share.c host/share.h host/input_focus.h host/touch_target.h | $(B)
 	$(CC) $(CFLAGS) -pthread tests/test_input_focus.c host/share.c -o $@
 test-keyboard-input: $(B)/test_keyboard_viewport $(B)/test_input_focus
 	$(B)/test_keyboard_viewport
@@ -414,3 +414,9 @@ $(B)/test_sidebar: ios/Henge/SidebarPreferences.swift tests/test_sidebar.swift |
 test-sidebar: $(B)/test_sidebar
 	$(B)/test_sidebar
 .PHONY: test-sidebar
+
+$(B)/test_touch_target: tests/test_touch_target.c host/touch_target.h tools/touch-target-policy.h | $(B)
+	$(CC) $(CFLAGS) $< -o $@
+test-touch-target: $(B)/test_touch_target
+	$(B)/test_touch_target
+.PHONY: test-touch-target

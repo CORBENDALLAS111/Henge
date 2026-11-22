@@ -2,6 +2,7 @@
 // and keeps the shared folder mounted. It talks to host/share.c at 10.0.2.4, which only exists inside Henge.
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#include "touch-target-policy.h"
 #include <arpa/inet.h>
 #include <math.h>
 #include <netinet/in.h>
@@ -9,6 +10,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <time.h>
 
 #define HOST "10.0.2.4"
 
@@ -171,10 +173,116 @@ static void checkFocus(void) {
     });
 }
 
+static double targetTime(void) {
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return t.tv_sec+t.tv_nsec/1e9;
+}
+static BOOL targetRect(AXUIElementRef element,CGRect *rect) {
+    CFTypeRef position=NULL,size=NULL; CGPoint p=CGPointZero; CGSize z=CGSizeZero;
+    AXError a=AXUIElementCopyAttributeValue(element,kAXPositionAttribute,&position);
+    AXError b=AXUIElementCopyAttributeValue(element,kAXSizeAttribute,&size);
+    BOOL ok=a==kAXErrorSuccess && b==kAXErrorSuccess && position && size &&
+        CFGetTypeID(position)==AXValueGetTypeID() && CFGetTypeID(size)==AXValueGetTypeID() &&
+        AXValueGetType((AXValueRef)position)==kAXValueCGPointType &&
+        AXValueGetType((AXValueRef)size)==kAXValueCGSizeType &&
+        AXValueGetValue((AXValueRef)position,kAXValueCGPointType,&p) &&
+        AXValueGetValue((AXValueRef)size,kAXValueCGSizeType,&z) &&
+        isfinite(p.x) && isfinite(p.y) && isfinite(z.width) && isfinite(z.height) && z.width>0 && z.height>0;
+    if(position) CFRelease(position); if(size) CFRelease(size);
+    if(ok) *rect=CGRectMake(p.x,p.y,z.width,z.height);
+    return ok;
+}
+
+/* The normalized framebuffer point maps to the guest's main display in AX's
+   top-left logical coordinate space, including Retina "Looks like" scaling.
+   No pointer movement, AX actions, text, titles or field values are requested. */
+static int targetHint(double x,double y) {
+    if(!AXIsProcessTrusted()) return HV_TARGET_PERMISSION;
+    CGRect screen=CGDisplayBounds(CGMainDisplayID());
+    if(CGRectIsEmpty(screen)) return HV_TARGET_UNKNOWN;
+    CGPoint point=CGPointMake(screen.origin.x+x*screen.size.width,screen.origin.y+y*screen.size.height);
+    double deadline=targetTime()+0.080;
+    AXUIElementRef system=AXUIElementCreateSystemWide(),item=NULL;
+    AXUIElementSetMessagingTimeout(system,0.025f);
+    AXError error=AXUIElementCopyElementAtPosition(system,(float)point.x,(float)point.y,&item);
+    CFRelease(system);
+    if(error!=kAXErrorSuccess || !item) { if(item) CFRelease(item); return HV_TARGET_UNKNOWN; }
+    NSMutableArray *elements=[NSMutableArray array],*roles=[NSMutableArray array];
+    BOOL title=NO,edge=NO,selectable=NO,complete=NO;
+    for(int depth=0;item && depth<8 && targetTime()<deadline;depth++) {
+        AXUIElementSetMessagingTimeout(item,0.025f);
+        [elements addObject:CFBridgingRelease(item)]; item=NULL;
+        AXUIElementRef current=(__bridge AXUIElementRef)elements.lastObject;
+        CFTypeRef raw=NULL;
+        if(AXUIElementCopyAttributeValue(current,kAXRoleAttribute,&raw)!=kAXErrorSuccess || !raw) break;
+        if(CFGetTypeID(raw)!=CFStringGetTypeID()) { CFRelease(raw); break; }
+        NSString *role=CFBridgingRelease(raw); [roles addObject:role];
+        const char *names[8]; for(NSUInteger i=0;i<roles.count;i++) names[i]=[roles[i] UTF8String];
+        int direct=hv_touch_role_hint(names,roles.count,0,0,0);
+        if(direct!=HV_TARGET_UNKNOWN) return targetTime()<=deadline ? direct : HV_TARGET_UNKNOWN;
+        if([role isEqualToString:@"AXWindow"]) {
+            CFTypeRef label=NULL;
+            if(AXUIElementCopyAttributeValue(current,kAXTitleUIElementAttribute,&label)==kAXErrorSuccess && label) {
+                for(id element in elements) if(CFEqual((__bridge CFTypeRef)element,label)) title=YES;
+                CFRelease(label);
+            }
+            if([roles.firstObject isEqualToString:@"AXWindow"]) {
+                CGRect frame; Boolean resizable=false;
+                if(targetRect(current,&frame) && CGRectContainsPoint(frame,point) &&
+                   AXUIElementIsAttributeSettable(current,kAXSizeAttribute,&resizable)==kAXErrorSuccess && resizable) {
+                    edge=point.x-CGRectGetMinX(frame)<=5 || CGRectGetMaxX(frame)-point.x<=5 ||
+                         point.y-CGRectGetMinY(frame)<=5 || CGRectGetMaxY(frame)-point.y<=5;
+                }
+            }
+            complete=YES; break;
+        }
+        if(depth==0 && [@[ @"AXTextField",@"AXTextArea",@"AXStaticText" ] containsObject:role]) {
+            CFArrayRef attributes=NULL;
+            if(AXUIElementCopyAttributeNames(current,&attributes)==kAXErrorSuccess && attributes) {
+                selectable=[(__bridge NSArray *)attributes containsObject:(__bridge NSString *)kAXSelectedTextRangeAttribute];
+                CFRelease(attributes);
+            }
+        }
+        CFTypeRef parent=NULL;
+        if(AXUIElementCopyAttributeValue(current,kAXParentAttribute,&parent)!=kAXErrorSuccess || !parent) { complete=YES; break; }
+        if(CFGetTypeID(parent)!=AXUIElementGetTypeID()) { CFRelease(parent); break; }
+        item=(AXUIElementRef)parent;
+    }
+    if(item) CFRelease(item);
+    if(!complete || targetTime()>deadline) return HV_TARGET_UNKNOWN;
+    const char *names[8]; for(NSUInteger i=0;i<roles.count;i++) names[i]=[roles[i] UTF8String];
+    return hv_touch_role_hint(names,roles.count,title,edge,selectable);
+}
+
+/* Event-driven long poll on a separate queue. Slow or unsupported AX providers
+   never block the agent's clipboard, focus reporter, or the host's UI thread. */
+static void followTouchTargets(void) {
+    unsigned long long since=0; BOOL prompted=NO;
+    for(;;) { @autoreleasepool {
+        int status=0;
+        NSData *data=request(@"GET",[NSString stringWithFormat:@"/.henge/touch-target?since=%llu",since],nil,&status,NULL);
+        if(status!=200 || data.length>100) { if(status==403) prompted=NO; if(status!=204) sleep(2); continue; }
+        NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        unsigned long long id=0; double x=0,y=0; char extra;
+        if(!text || sscanf(text.UTF8String,"%llu %lf %lf %c",&id,&x,&y,&extra)!=3 || !id ||
+           !isfinite(x) || !isfinite(y) || x<0 || x>1 || y<0 || y>1) continue;
+        since=id;
+        int hint=targetHint(x,y);
+        if(hint==HV_TARGET_PERMISSION && !prompted) {
+            prompted=YES;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt:@YES});
+            });
+        }
+        NSString *reply=[NSString stringWithFormat:@"%llu %d",id,hint];
+        request(@"PUT",@"/.henge/touch-target",[reply dataUsingEncoding:NSUTF8StringEncoding],&status,NULL);
+    } }
+}
+
 int main(void) {
     @autoreleasepool {
         lastChange = NSPasteboard.generalPasteboard.changeCount;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ followDevice(); });
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{ followTouchTargets(); });
         keepMounted();
         [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *timer) { (void)timer; checkFocus(); }];
         [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) { (void)timer; checkClipboard(); }];

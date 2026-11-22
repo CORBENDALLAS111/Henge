@@ -7,6 +7,7 @@ import CoreGraphics
 /// A held Pencil produces a double-click only on lift, so it can still become a drag.
 struct DirectContactGesture {
     enum Tool { case finger, pencil }
+    enum TargetHint: Int32 { case automatic = 0, drag = 1, scroll = 2 }
     enum Action: Equatable {
         case down(CGPoint), move(CGPoint), up(CGPoint)
         case click(CGPoint, count: Int, secondary: Bool)
@@ -22,6 +23,9 @@ struct DirectContactGesture {
     private var scrollSwipes = false
     private var previousTap: (point: CGPoint, time: TimeInterval)?
     private var tapDrag = false
+    private var targetHint = TargetHint.automatic
+    private var targetPending = false
+    var awaitingTarget: Bool { phase == .pending && targetPending }
     static let scrollKey = "henge.touch.oneFingerScrolling"
     static let defaultOneFingerScrolling = true
     static let pencilTabletKey = "henge.pencil.graphicsTablet"
@@ -30,6 +34,17 @@ struct DirectContactGesture {
     static let pencilDoubleDelay: TimeInterval = 0.45
     static let tapDragInterval: TimeInterval = 0.35
     static let tapDragDistance: CGFloat = 24
+    static let smartTargetsKey = "henge.touch.smartTargets"
+    static let targetWait: TimeInterval = 0.120 // host/touch_target.h protocol lifetime
+
+    /// A reply belongs only to this still-undecided contact. Never change a
+    /// button/gesture already delivered to macOS, or apply a late app response.
+    @discardableResult mutating func resolveTarget(_ hint: TargetHint, time: TimeInterval) -> Bool {
+        guard awaitingTarget, time.isFinite, time >= began, time - began <= Self.targetWait else { return false }
+        targetPending = false; targetHint = hint
+        return true
+    }
+    mutating func expireTarget() { targetPending = false }
 
     /// Joining a second finger must not turn an existing drag/scroll/context
     /// action into a new click, even if the first finger returns to its origin.
@@ -39,9 +54,11 @@ struct DirectContactGesture {
 
     @discardableResult
     mutating func begin(_ point: CGPoint, tool: Tool, time: TimeInterval, scrollFingerSwipes: Bool = false,
-                        pencilTablet: Bool = false) -> [Action] {
+                        pencilTablet: Bool = false, awaitTarget: Bool = false) -> [Action] {
         self.tool = tool; origin = point; began = time; phase = .pending
         scrollSwipes = scrollFingerSwipes && tool == .finger
+        targetHint = .automatic
+        targetPending = scrollSwipes && awaitTarget
         tapDrag = false
         if scrollSwipes, let tap = previousTap, time.isFinite, time >= tap.time,
            time - tap.time <= Self.tapDragInterval,
@@ -49,6 +66,7 @@ struct DirectContactGesture {
             tapDrag = true
         }
         previousTap = nil
+        if tapDrag { targetPending = false } // explicit user intent always wins
         if pencilTablet && tool == .pencil {
             phase = .dragging
             return [.down(point)]
@@ -62,7 +80,12 @@ struct DirectContactGesture {
         case .pending:
             let distance = hypot(point.x - origin.x, point.y - origin.y)
             guard distance >= (tool == .finger ? 10 : 4) else { return [] }
-            if scrollSwipes, !tapDrag, let time, time.isFinite, time >= began, time - began < Self.dragDelay {
+            if targetPending {
+                if let time, time - began < Self.targetWait { return [] }
+                targetPending = false
+            }
+            if scrollSwipes, !tapDrag, targetHint != .drag, let time, time.isFinite, time >= began,
+               targetHint == .scroll || time - began < Self.dragDelay {
                 phase = .scrolling
                 return [.scrollBegin(origin, time: began), .scroll(point, time: time)]
             }
@@ -79,15 +102,15 @@ struct DirectContactGesture {
         return [.click(origin, count: 1, secondary: true)]
     }
     mutating func end(_ point: CGPoint, time: TimeInterval) -> [Action] {
-        defer { phase = .idle; tapDrag = false }
+        defer { phase = .idle; tapDrag = false; targetPending = false }
         switch phase {
         case .pending:
             guard point.x.isFinite, point.y.isFinite, time.isFinite, time >= began else { return [] }
             // A flick can end before UIKit supplies a move sample. It is not a
             // stationary tap and must not click or auto-open the keyboard.
             guard hypot(point.x - origin.x, point.y - origin.y) < (tool == .finger ? 10 : 4) else {
-                if tapDrag { return [.down(origin), .move(point), .up(point)] }
-                if scrollSwipes, time.isFinite, time >= began, time - began < Self.dragDelay {
+                if tapDrag || targetHint == .drag { return [.down(origin), .move(point), .up(point)] }
+                if scrollSwipes, targetHint == .scroll || time - began < Self.dragDelay {
                     return [.scrollBegin(origin, time: began), .scroll(point, time: time), .scrollEnd(time: time)]
                 }
                 return []
@@ -102,5 +125,5 @@ struct DirectContactGesture {
         default: return []
         }
     }
-    mutating func reset() { phase = .idle; previousTap = nil; tapDrag = false }
+    mutating func reset() { phase = .idle; previousTap = nil; tapDrag = false; targetPending = false; targetHint = .automatic }
 }

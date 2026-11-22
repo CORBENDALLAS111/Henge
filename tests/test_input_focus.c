@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 static int call(const char *socket_path,const char *method,const char *path,const char *body,char response[4096]) {
     int fd=socket(AF_UNIX,SOCK_STREAM,0); assert(fd>=0);
     struct sockaddr_un a={.sun_family=AF_UNIX}; snprintf(a.sun_path,sizeof a.sun_path,"%s",socket_path);
@@ -16,6 +17,12 @@ static int call(const char *socket_path,const char *method,const char *path,cons
     size_t have=0; ssize_t got;
     while(have<4095 && (got=recv(fd,response+have,4095-have,0))>0) have+=got;
     close(fd); response[have]=0; int code=0; assert(sscanf(response,"HTTP/1.1 %d",&code)==1); return code;
+}
+typedef struct { const char *socket; char response[4096]; int code; } TargetClient;
+static void *follow_target(void *arg) {
+    TargetClient *client=arg;
+    client->code=call(client->socket,"GET","/.henge/touch-target?since=0","",client->response);
+    return NULL;
 }
 int main(void) {
     alarm(10); HvInputFocus f;
@@ -36,6 +43,31 @@ int main(void) {
     assert(hv_share_focus(bounds,&age)==-2); // old focus cannot trigger a new mode
     assert(call(sock,"PUT","/.henge/focus","-1 0 0 0 0",response)==204 && hv_share_focus(bounds,&age)==-1);
     hv_share_set_focus_enabled(0);
+    assert(call(sock,"GET","/.henge/touch-target","",response)==403);
+    assert(call(sock,"GET","/.henge/touch-target?since=-1","",response)==400);
+    hv_share_set_target_enabled(1);
+    assert(!hv_share_target_request(.2,.3)); // old or absent helper: no gesture delay
+    TargetClient client={.socket=sock}; pthread_t worker;
+    assert(!pthread_create(&worker,NULL,follow_target,&client));
+    uint64_t id=0;
+    for(int tries=0;tries<100 && !id;tries++) { id=hv_share_target_request(.2,.3); if(!id) usleep(1000); }
+    assert(id); pthread_join(worker,NULL);
+    assert(client.code==200);
+    unsigned long long received=0; double x,y;
+    assert(sscanf(strstr(client.response,"\r\n\r\n")+4,"%llu %lf %lf",&received,&x,&y)==3);
+    assert(received==id && x==.2 && y==.3);
+    char answer[80]; snprintf(answer,sizeof answer,"%llu 1",(unsigned long long)id);
+    assert(call(sock,"PUT","/.henge/touch-target","1 1 private-content",response)==400);
+    assert(call(sock,"PUT","/.henge/touch-target",answer,response)==204);
+    assert(hv_share_target_result(id)==1);
+    assert(call(sock,"PUT","/.henge/touch-target",answer,response)==409); // duplicate cannot change intent
+    hv_share_target_cancel(id);
+    assert(hv_share_target_result(id)==-2);
+    hv_share_set_target_enabled(0);
+    assert(call(sock,"PUT","/.henge/touch-target",answer,response)==403);
+    hv_share_set_target_enabled(1);
+    assert(!hv_share_target_request(.2,.3)); // previous session's helper freshness is invalid
+    hv_share_set_target_enabled(0);
     unlink(sock); rmdir(dir);
-    puts("PASS: opt-in focus endpoint, permission state, metadata validation and mode reset");
+    puts("PASS: opt-in focus/target endpoints, long-poll delivery, metadata validation, no-helper fallback, cancellation and mode reset");
 }

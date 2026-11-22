@@ -45,6 +45,7 @@ struct SessionView: View {
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
     @AppStorage(DirectMultiTouchGate.contextTapKey) private var twoFingerContextTap = false
+    @AppStorage(DirectContactGesture.smartTargetsKey) private var smartTargets = false
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -140,7 +141,7 @@ struct SessionView: View {
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
                     if !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet, twoFingerContextTap: twoFingerContextTap,
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet, twoFingerContextTap: twoFingerContextTap, smartTargets: smartTargets,
                                            imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
                             .frame(width: layout.touch.width, height: layout.touch.height)
                             .position(x: layout.touch.midX, y: layout.touch.midY)
@@ -269,16 +270,20 @@ struct SessionView: View {
         }
         .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil; keyboardTapPoint = nil } }
         .onChange(of: keyboardMode == "text" && touchInputActive, initial: true) { _, enabled in henge_share_set_focus_enabled(enabled ? 1 : 0) }
+        .onChange(of: smartTargets && oneFingerScrolling && touchMode == "direct" && touchInputActive && !display.isExternal, initial: true) { _, enabled in
+            henge_share_set_target_enabled(enabled ? 1 : 0)
+        }
         .task(id: keyboardMode) { await followKeyboardFocus() }
         .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
         .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
-        .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0) }
+        .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0); henge_share_set_target_enabled(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
         .onChange(of: sidebar) { _, value in value.save(for: mac.id) }
         .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
         .onChange(of: pencilTablet) { _ in resetPointerInput() }
         .onChange(of: twoFingerContextTap) { _ in resetPointerInput() }
+        .onChange(of: smartTargets) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
         .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in
@@ -727,8 +732,8 @@ struct SessionView: View {
                         showDetails = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showFiles = true }
                     }
-                    if !helperRunning {
-                        Button("Type the Set Up Command") {
+                    Group {
+                        Button(helperRunning ? "Type the Update Command" : "Type the Set Up Command") {
                             showDetails = false
                             Task {
                                 try? await Task.sleep(nanoseconds: 600_000_000)
@@ -737,7 +742,7 @@ struct SessionView: View {
                         }
                     }
                     Text(helperRunning
-                         ? "Put files in Files, Henge, Shared to see them in the Henge folder in this Mac's home folder. What you copy on the Mac is copied here too, and the paste button pastes from here into the Mac."
+                         ? "Put files in Files, Henge, Shared to see them in the Henge folder in this Mac's home folder. What you copy on the Mac is copied here too, and the paste button pastes from here into the Mac. Run the Update Command in the Mac's Terminal after updating Henge to refresh guest-helper features."
                          : "Once for each Mac: open Terminal on the Mac, tap this, then press Return. When macOS asks about henge-agent and local networks, choose Allow. It types \(Sharing.setUpCommand) and needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

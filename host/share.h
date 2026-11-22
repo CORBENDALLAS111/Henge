@@ -2,6 +2,7 @@
 #define HENGEVM_SHARE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* What the Mac and the device share: a folder and the clipboard (see share.c). The guest reaches this
    at HV_SHARE_ADDR, port 80, which the network hands to the Unix socket. Returns 0, or -1 if the socket
@@ -19,5 +20,9 @@ void hv_share_set_focus_enabled(int enabled);
 /* -2 unavailable/stale, -1 permission needed, 0 noneditable, 1 editable.
    bounds: normalized x/y/width/height; age: seconds since guest report. */
 int hv_share_focus(double bounds[4], double *age);
+void hv_share_set_target_enabled(int enabled);
+uint64_t hv_share_target_request(double x,double y);
+int hv_share_target_result(uint64_t id); /* -2 pending/stale, -1 permission, 0 unknown, 1 drag, 2 scroll */
+void hv_share_target_cancel(uint64_t id);
 
 #endif

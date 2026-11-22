@@ -5,6 +5,7 @@ struct TouchControlOptions: View {
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
     @AppStorage(DirectMultiTouchGate.contextTapKey) private var twoFingerContextTap = false
+    @AppStorage(DirectContactGesture.smartTargetsKey) private var smartTargets = false
     var body: some View {
         Picker("Control method", selection: $mode) {
             Text("Trackpad").tag("trackpad")
@@ -19,6 +20,11 @@ struct TouchControlOptions: View {
             Text("Optional: a quick stationary two-finger tap right-clicks between your fingers. Scrolling, pinch and long press keep their existing behavior.")
                 .font(.footnote).foregroundStyle(.secondary)
             Toggle("One-finger scrolling", isOn: $oneFingerScrolling)
+            if oneFingerScrolling {
+                Toggle("Smart drag and scroll (guest helper)", isOn: $smartTargets)
+                Text("Experimental. Update Shared Files & Clipboard's guest helper and allow it in macOS Accessibility. The helper checks the role under your finger: draggable controls and window titles drag, scroll areas scroll. Unsupported or slow apps use the normal gestures. Only roles and geometry are read.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Text(oneFingerScrolling
                  ? "Swipe to scroll. To drag immediately, tap, then touch the same object again and move without lifting. Or pause briefly before moving. Keep holding still for a context menu. Scrolling follows the Mac's natural direction and inertia settings. Apple Pencil still drags directly."
                  : "Move one finger to drag. Use two fingers to scroll, or enable one-finger scrolling above.")

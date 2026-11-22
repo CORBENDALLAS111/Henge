@@ -138,6 +138,13 @@ The optional diagnostic prints fixed allowlisted error domains/codes/counts and 
 
 ## Acceptance and verification ledger
 
+Follow-up: [guest-assisted smart drag/scroll](smart-touch-targets.md) adds an
+opt-in Accessibility hit-test bridge to the current audit branch. It advises
+intent for exposed controls/window titles and scrolling containers with a
+bounded asynchronous query. It preserves tap-then-drag and falls back for old
+helpers, denied permission, unknown apps or late replies. It is experimental,
+requires updating the guest helper, and has no physical-device acceptance yet.
+
 “Required” means a physical-device test remains. CI on a Mac and simulated HID queues do not establish it.
 
 | Acceptance case | Automated evidence | Physical iPad/iPhone / guest test |

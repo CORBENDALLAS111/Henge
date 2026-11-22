@@ -10,6 +10,7 @@
    Locks are accepted but not enforced: macOS only writes to a server that offers them, and there is one client. */
 #include "share.h"
 #include "input_focus.h"
+#include "touch_target.h"
 
 #include <copyfile.h>
 #include <dirent.h>
@@ -52,6 +53,35 @@ static double focus_seen;
 static double focus_now(void) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
     return ts.tv_sec + ts.tv_nsec/1e9;
+}
+static pthread_mutex_t target_mu=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t target_cond=PTHREAD_COND_INITIALIZER;
+static HvTouchTarget target;
+static double target_agent_seen;
+void hv_share_set_target_enabled(int enabled) {
+    pthread_mutex_lock(&target_mu);
+    if(target.enabled != !!enabled) target_agent_seen=0;
+    hv_target_enable(&target,enabled);
+    pthread_cond_broadcast(&target_cond);
+    pthread_mutex_unlock(&target_mu);
+}
+uint64_t hv_share_target_request(double x,double y) {
+    pthread_mutex_lock(&target_mu);
+    double now=focus_now();
+    uint64_t id=target_agent_seen && now-target_agent_seen<=12 ? hv_target_request(&target,x,y,now) : 0;
+    pthread_cond_broadcast(&target_cond);
+    pthread_mutex_unlock(&target_mu); return id;
+}
+int hv_share_target_result(uint64_t id) {
+    pthread_mutex_lock(&target_mu);
+    int hint=hv_target_result(&target,id,focus_now());
+    pthread_mutex_unlock(&target_mu); return hint;
+}
+void hv_share_target_cancel(uint64_t id) {
+    pthread_mutex_lock(&target_mu);
+    if(target.active==id) target.active=0;
+    pthread_cond_broadcast(&target_cond);
+    pthread_mutex_unlock(&target_mu);
 }
 void hv_share_set_focus_enabled(int enabled) {
     pthread_mutex_lock(&clip_mu);
@@ -732,6 +762,41 @@ static int clipboard_put(Conn *c, Request *r) {
 
 static int serve_henge(Conn *c, Request *r) {
     const char *what = r->path + strlen("/.henge/");
+    if (!strcmp(what,"touch-target") && !strcmp(r->method,"GET")) {
+        if(body_discard(c,r)!=0) return -1;
+        unsigned long long since=0;
+        if(r->query[0]) {
+            if(strncmp(r->query,"since=",6) || !isdigit((unsigned char)r->query[6])) return respond_empty(c,r,400,"Bad Request");
+            char *end; errno=0; since=strtoull(r->query+6,&end,10);
+            if(errno || *end) return respond_empty(c,r,400,"Bad Request");
+        }
+        struct timespec until; clock_gettime(CLOCK_REALTIME,&until); until.tv_sec+=10;
+        pthread_mutex_lock(&target_mu);
+        if(target.enabled) target_agent_seen=focus_now();
+        while(target.enabled && (!target.active || target.active<=since || target.ready ||
+              focus_now()-target.requested>HV_TARGET_TIMEOUT)) {
+            int rc=pthread_cond_timedwait(&target_cond,&target_mu,&until);
+            if(rc) break;
+        }
+        int enabled=target.enabled;
+        char text[100]; int n=0;
+        if(enabled && target.active>since && !target.ready && focus_now()-target.requested<=HV_TARGET_TIMEOUT)
+            n=snprintf(text,sizeof text,"%llu %.9f %.9f",(unsigned long long)target.active,target.x,target.y);
+        pthread_mutex_unlock(&target_mu);
+        if(!enabled) return respond_empty(c,r,403,"Forbidden");
+        return n ? respond(c,r,200,"OK","Content-Type: text/plain\r\n",text,(size_t)n)
+                 : respond_empty(c,r,204,"No Content");
+    }
+    if (!strcmp(what,"touch-target") && !strcmp(r->method,"PUT")) {
+        if(r->chunked || r->length<1 || r->length>=80) { r->close=1; return respond_empty(c,r,400,"Bad Request"); }
+        size_t n=0; char *body=body_small(c,r,&n); if(!body) return -1;
+        uint64_t id=0; int hint=0,valid=hv_target_parse_answer(body,n,&id,&hint); free(body);
+        if(!valid) return respond_empty(c,r,400,"Bad Request");
+        pthread_mutex_lock(&target_mu);
+        int enabled=target.enabled,accepted=hv_target_answer(&target,id,hint,focus_now());
+        pthread_mutex_unlock(&target_mu);
+        return respond_empty(c,r,!enabled?403:accepted?204:409,!enabled?"Forbidden":accepted?"No Content":"Conflict");
+    }
     if (!strcmp(what,"input-settings") && !strcmp(r->method,"GET")) {
         if (body_discard(c,r)!=0) return -1;
         pthread_mutex_lock(&clip_mu); int enabled=focus_enabled; pthread_mutex_unlock(&clip_mu);

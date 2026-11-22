@@ -80,6 +80,10 @@ char *henge_share_take_clipboard(void);
 long henge_share_agent_seen(void);
 void henge_share_set_focus_enabled(int enabled);
 int henge_share_focus(double bounds[4], double *age);
+void henge_share_set_target_enabled(int enabled);
+uint64_t henge_share_target_request(double x,double y);
+int henge_share_target_result(uint64_t id);
+void henge_share_target_cancel(uint64_t id);
 
 /* The size macOS is told its screen is. Before henge_vm_boot. */
 void henge_vm_set_display(uint32_t width, uint32_t height);
