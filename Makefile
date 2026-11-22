@@ -129,8 +129,13 @@ $(B)/test_dt_fixup: tests/test_dt_fixup.c host/dt_fixup.c host/dt_fixup.h | $(B)
 $(B)/test_%: tests/test_%.c tests/%_programs.S tests/harness.S tests/harness.h $(ENGINE)
 	$(CC) $(CFLAGS) -Itests tests/test_$*.c tests/$*_programs.S tests/harness.S $(ENGINE) -o $@
 
-test: all
+test: all test-core
+
+# Run the existing CPU/JIT/MMU/device suite without building restore tools or
+# a Hypervisor.framework reference VM, which aren't dependencies of the tests.
+test-core: $(TESTS)
 	@ulimit -s 65520; for t in $(TESTS); do echo "== $$t"; $$t || exit 1; done # a test keeps a whole HvCpu (2 MB of TLB and more) on its stack
+.PHONY: test test-core
 
 $(B):
 	mkdir -p $(B)
