@@ -58,6 +58,7 @@ jobs:
           find ios/Henge ios/HengeJITHelper -name '*.swift' -print0 | xargs -0 xcrun swiftc -frontend -parse
           bash -n tools/check-apple-services.sh
           cmp tools/check-apple-services.sh ios/Henge/Resources/check-apple-services.sh
+          python3 tests/test_apple_account_diagnostics.py
 
       - name: Compile app sources and display routing
         working-directory: Henge

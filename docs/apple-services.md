@@ -79,6 +79,32 @@ endpoints. It does not read Keychains, account databases, identifiers, tokens,
 cookies or HTTP bodies and never attempts sign-in. A 3xx/4xx HTTP response can
 still establish successful DNS/TCP/TLS; `curl_exit=0` does not establish login.
 
+For an existing Ventura guest, repeat the failed login and then run
+`bash check-apple-services.sh --account-errors` within ten minutes. The script
+also checks the exact kernel build, whether the legacy model is visible and
+whether the serial is still the `1234` placeholder. It outputs only yes/no or
+fixed status values for these identity indicators. A recognized build or a
+non-placeholder serial alone does not mean compatibility or sign-in succeeded.
+
+The optional error mode reads recent error/fault events from selected account
+processes, and outputs only allowlisted error-domain names, integer codes and
+counts. Raw messages, account names, tokens and identifiers are never printed
+or written to a file. The log reader's exit code is reported: no detected pairs
+can mean unavailable/redacted logs, not absence of an authentication failure.
+Nested errors or unrelated account events can appear in the same ten-minute
+window; correlate them with the attempted login rather than assuming a cause.
+
+The current script can be used without updating the IPA. Run inside Ventura:
+
+```sh
+curl -fsS 'https://raw.githubusercontent.com/CORBENDALLAS111/Henge/fix/apple-account-compatibility/tools/check-apple-services.sh' | /bin/bash -s -- --account-errors
+```
+
+This is a read-only diagnostic, not an account reset. Do not rotate the saved
+identity or erase caches/Keychains merely because App Store still says Sign In.
+The user's earlier report had reached MFA before an app-version incompatibility;
+that observation does not confirm completion of the current login attempt.
+
 - Missing route/DNS: check Henge's NAT startup and bounded DNS failure messages
   in `henge.log`, and compare a different network/VPN configuration.
 - Curl 6/7/28: resolution, connection or timeout failure respectively. Curl 35

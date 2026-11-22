@@ -80,7 +80,7 @@ struct AppleAccountSetupView: View {
                 Link("Read the source fork's test results", destination: URL(string: "https://github.com/liukaixiang817/Henge/blob/7fbc8651e8bc01319b3fb90ac614723416d526ba/docs/apple-account-compatibility.md")!)
             }
             Section("If sign-in fails") {
-                Text("Open Details → Network & Devices in the running session and use Type Diagnostic Command with Terminal open. The report includes the macOS version and build, time and connection checks. Keep your password and verification code inside macOS.")
+                Text("Repeat the failed sign-in, then open Details → Network & Devices and use Type Diagnostic Command with Terminal open. The report checks the macOS build, profile indicators, time and connection, and includes recent error domains and codes. It does not include account names, passwords or verification codes.")
                 Text("A matched compatibility profile, a visible App Store catalog or a successful build does not establish sign-in or cloud synchronization.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
