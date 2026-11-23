@@ -143,19 +143,20 @@ V2 controls described above. Physical Ventura/iPad hit-test
 accuracy and latency remain acceptance work, including Retina/custom resolution,
 window titles/edges, Safari/System Settings, controls and custom-drawn apps.
 
-## Semantic V2 verification status
+## Semantic V2 verification
 
 Runtime implementation: `2375e943a1807ec854fcec7d7cbf3c841f290767`.
 Portable Swift object/gesture/keyboard tests and ASan/UBSan C protocol/policy
-fixtures pass locally. Real sharing-server V1/V2 integration, complete Apple SDK
-compilation and IPA packaging are part of [workflow 45157757335](https://github.com/CORBENDALLAS111/Henge/actions/runs/45157757335).
+fixtures pass locally. Both attempts of [workflow 45157757335](https://github.com/CORBENDALLAS111/Henge/actions/runs/45157757335)
+failed to acquire a hosted runner, so neither executed Apple SDK or packaging.
 
-On 2026-11-23 the first workflow attempt did not start a runner and ended with
-the infrastructure annotation: `The job was not acquired by Runner of type
-hosted even after multiple attempts`. No Apple SDK tests executed in that
-attempt. The single retry also ended with the same infrastructure annotation
-without starting a runner (job 137644183280, completed 2026-11-23 11:10 UTC).
-Neither attempt executed Apple SDK, real server integration, native regression
-or packaging steps. These checks remain blocked, rather than passed.
-There is no verified V2 IPA yet; the V1 artifact above does not contain the new
-semantic controls. Physical-device acceptance is also still required.
+The later combined runtime revision
+[`23270c0353508e84b3c766f723e909f5714d1c5e`](https://github.com/CORBENDALLAS111/Henge/commit/23270c0353508e84b3c766f723e909f5714d1c5e)
+includes V2 and host-device integration. [Workflow 45169376155 passed](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155),
+including full Apple SDK/helper compilation, real V1/V2/focus/device sharing
+server integration, native core/renderer/lifecycle checks and packaging.
+[Verified V2 IPA](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155/artifacts/14816831584)
+and [full build/digest record](MACOS_FEATURE_PARITY.md#verified-semantic-v2-and-device-integration-build-2026-11-23).
+The desktop HID driver fixture explicitly skipped due to runner permissions.
+Physical Ventura/iPad acceptance is still required. Update both IPA and helper;
+the V1 artifact above does not contain the semantic controls.

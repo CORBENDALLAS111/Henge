@@ -217,7 +217,7 @@ it is default-off and remains partial until physical Ventura/iPad validation.
 Unknown/slow providers retain existing gestures. No Touch Bar, Continuity or
 Apple Account compatibility claim is added by this bridge.
 
-## Semantic V2 build blocker (2026-11-23)
+## Earlier semantic V2 build blocker (2026-11-23)
 
 Runtime code `2375e943a1807ec854fcec7d7cbf3c841f290767` implements the richer
 object metadata, precise controls, button/scroll precedence and keyboard gating.
@@ -226,5 +226,40 @@ fixtures passed. Both attempts of [workflow 45157757335](https://github.com/CORB
 failed before any runner was assigned: `The job was not acquired by Runner of
 type hosted even after multiple attempts`. Complete Apple SDK compilation,
 real V1/V2 host-server integration, native regressions and packaging have not run
-for this revision. No V2 IPA is available, and no physical validation is claimed.
+for that revision. No V2 IPA was produced by those two attempts.
 The earlier verified V1 artifacts above do not contain semantic V2 controls.
+
+## Verified semantic V2 and device integration build (2026-11-23)
+
+Runtime revision [`23270c0353508e84b3c766f723e909f5714d1c5e`](https://github.com/CORBENDALLAS111/Henge/commit/23270c0353508e84b3c766f723e909f5714d1c5e)
+adds [host device integration](device-integration.md) and includes the semantic
+V2 implementation. [Workflow 45169376155](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155)
+acquired an Xcode 27 runner and **passed**, resolving the earlier compilation
+and packaging blocker. Subsequent documentation commits do not change this IPA.
+
+- Full arm64 iOS SDK compile with minimum iOS 17, display/renderer compile and
+  macOS guest helper compile passed.
+- New host-device state/revisions/expiry, PCM S16/S32/float gain, per-VM settings
+  and real production HTTP control exchange passed. Existing V1/V2/focus HTTP,
+  semantic object/contact/keyboard, scrolling, sidebar/modifier, resolution,
+  USB/Pencil/gamepad, Files, Bonjour and account diagnostic fixtures passed.
+- All existing core/JIT/MMU/exception/device tests passed (device suite: 135
+  checks, zero failures), as did Metal surface/retry, compatibility/identity,
+  DNS/PVG teardown and full native VM lifecycle tests.
+- Actual desktop IOHIDUserDevice acceptance explicitly skipped due to runner
+  permissions. A green fixture does not validate real iPad peripherals,
+  Ventura applications, Apple Account authentication or the reported magenta bug.
+
+[IPA artifact 14816831584](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155/artifacts/14816831584)
+is version 0.3.0 (101), 10,124,684 bytes, arm64, minimum iOS 17. Download checks
+verified the GitHub archive digest, ZIP integrity, Mach-O, source-revision stamp,
+diagnostics against Git source and packaged helper strings for semantic V2,
+device status/control, brightness and mute. IPA SHA-256:
+
+`1984c7f2423aa393f33dbcc68487bafca6eebcb316fecc1f0e135826f5cf1cdd`
+
+[TIPA artifact 14816457806](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155/artifacts/14816457806)
+was also produced by the existing workflow. Both features require updating the
+guest helper. Smart touch needs guest Accessibility access and host opt-in;
+guest brightness/VM audio control needs Device Integration permission. Physical
+acceptance remains required for every case in this audit and the device guide.

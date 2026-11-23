@@ -95,8 +95,8 @@ helper actually packaged in the IPA. Portable C state/DSP tests pass locally
 with AddressSanitizer and UndefinedBehaviorSanitizer; settings and gesture
 fixtures pass with Swift 6.2.3 under WSL. WSL cannot compile macOS filesystem APIs
 used by the real sharing server; that integration test requires the Mac runner.
-Build results are recorded separately; source implementation is not hardware
-acceptance.
+The build below passed that real Mac-server integration test and full Apple SDK
+compilation; source/CI verification is not hardware acceptance.
 
 Physical-device acceptance remains required:
 
@@ -112,6 +112,22 @@ Physical-device acceptance remains required:
 5. Suspend/resume, shut down/restart, reopen another VM and update the helper.
    Verify no old command applies to a replacement session, and clipboard, Files,
    smart-touch behavior and guest data remain intact.
+
+## Verified build
+
+Code [`23270c0353508e84b3c766f723e909f5714d1c5e`](https://github.com/CORBENDALLAS111/Henge/commit/23270c0353508e84b3c766f723e909f5714d1c5e)
+passed [workflow 45169376155](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155)
+on 2026-11-23. Full SDK/helper/engine compilation, new state/DSP/settings/real
+HTTP integration tests and existing input, Metal and VM lifecycle regressions
+passed. The desktop IOHIDUserDevice test explicitly skipped for runner
+permissions. No physical iPad/guest feature acceptance is claimed.
+
+[Download IPA](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155/artifacts/14816831584)
+or [TIPA](https://github.com/CORBENDALLAS111/Henge/actions/runs/45169376155/artifacts/14816457806).
+The downloaded IPA's revision, digest, arm64 executable, iOS 17 target and
+packaged semantic V2/device-control helper were independently checked. See the
+[full verification record](MACOS_FEATURE_PARITY.md#verified-semantic-v2-and-device-integration-build-2026-11-23).
+Install this app build and update the guest helper as described above.
 
 ## Public API references
 
