@@ -177,7 +177,7 @@ The audit commit establishes this baseline. Follow-up commits record actual chan
 
 Run the repository's existing standalone Swift, USB/HID, native renderer and VM lifecycle targets through `.github/workflows/build-henge.yml`. New logic should be exercised directly, not solely source-grep assertions. Final build evidence and hardware gaps must accompany the artifact report.
 
-## Final build evidence
+## Verified parity build before smart touch
 
 Code revision: [`05d3580eff64eeb6d6b710f368d69dfae00a8823`](https://github.com/CORBENDALLAS111/Henge/commit/05d3580eff64eeb6d6b710f368d69dfae00a8823). [Workflow 45076370533](https://github.com/CORBENDALLAS111/Henge/actions/runs/45076370533) completed successfully on 2026-11-22. Subsequent documentation-only updates record these results; the IPA is stamped with this exact code revision.
 
@@ -193,3 +193,17 @@ Code revision: [`05d3580eff64eeb6d6b710f368d69dfae00a8823`](https://github.com/C
 `7aae664b096e713af529d37ec2282b9651887df7c7044c62fe616dfdee30be7c`
 
 [TIPA artifact 14775423016](https://github.com/CORBENDALLAS111/Henge/actions/runs/45076370533/artifacts/14775423016) was also produced by the existing workflow. No physical iPad/iPhone, Pencil Pro, external monitor, guest Apple Account or affected Ventura application was available for acceptance testing in this session. The twelve physical tests above remain required.
+
+## Latest smart-touch build
+
+The optional guest-assisted role/geometry hit-test bridge is implemented and
+automatically tested in code revision `78fcd4cceb03c50795edd25dbcb368660eaf6c57`.
+[Workflow 45083388413 passed](https://github.com/CORBENDALLAS111/Henge/actions/runs/45083388413),
+including real host sharing-server integration, late/stale-response rejection,
+host-relaunch recovery, gesture precedence, iOS SDK, native renderer and VM
+lifecycle checks. [Latest IPA](https://github.com/CORBENDALLAS111/Henge/actions/runs/45083388413/artifacts/14778655727)
+and [setup/verification details](smart-touch-targets.md#verified-build).
+It requires updating the guest helper and granting guest Accessibility access;
+it is default-off and remains partial until physical Ventura/iPad validation.
+Unknown/slow providers retain existing gestures. No Touch Bar, Continuity or
+Apple Account compatibility claim is added by this bridge.

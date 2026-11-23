@@ -84,3 +84,24 @@ that the packaged helper contains the new channel. Device tests still required:
 Ventura System Settings/Safari scroll, window title/border drag, sliders,
 splitters, text selection, Retina/custom resolutions, denied permission,
 unsupported apps and a busy/slow guest. No physical-device success is claimed.
+
+## Verified build
+
+Code revision [`78fcd4cceb03c50795edd25dbcb368660eaf6c57`](https://github.com/CORBENDALLAS111/Henge/commit/78fcd4cceb03c50795edd25dbcb368660eaf6c57)
+passed [workflow 45083388413](https://github.com/CORBENDALLAS111/Henge/actions/runs/45083388413)
+on 2026-11-22. The full iOS SDK compile, macOS helper, real sharing-server
+integration, role/mailbox policy, contact fixtures, native engine/Metal and VM
+lifecycle checks passed. The desktop IOHIDUserDevice permission test explicitly
+skipped. Local portable contact and sanitized mailbox/policy tests also passed.
+
+[IPA artifact 14778655727](https://github.com/CORBENDALLAS111/Henge/actions/runs/45083388413/artifacts/14778655727)
+is version 0.3.0 (101), minimum iOS 17, arm64, 10,076,483 bytes. Download checks
+verified the artifact digest, ZIP integrity, source stamp, diagnostics and the
+packaged arm64 guest helper's new touch-target channel. IPA SHA-256:
+
+`45eecd4c2ab1a484dd11c731973edcf4c061f4905273b39c73a72a66b98ab14d`
+
+Later changes record documentation and Make header dependencies; executable
+sources are unchanged from the built revision. Physical Ventura/iPad hit-test
+accuracy and latency remain acceptance work, including Retina/custom resolution,
+window titles/edges, Safari/System Settings, controls and custom-drawn apps.
