@@ -110,7 +110,9 @@ Rendering remains guest PVG → [pvg_lite.c](../devices/pvg_lite.c) → [pvg_met
 | Printers/scanners/MIDI / H,V,A | M | Host AirPrint UI is not a guest printer. CoreMIDI/allowed accessories could feed an explicit virtual-device/agent protocol | P1 / L–XL | No guest bridge |
 | iPhone/iPad discovery / H,V | P | Bonjour can advertise/discover selected services; USB pairing/restore libraries are not general Finder device passthrough | P1 / L | No guest Finder device acceptance |
 | AirDrop/Handoff/Universal Clipboard / S | M/R | No verified Continuity identity/radio/protocol integration; ordinary clipboard/network bridges do not implement these services | P2 / XL | Unsupported claim explicitly avoided |
-| Host battery/thermal diagnostics / H | P | SessionView.swift displays thermal state, JIT activity/network frames; no guest battery device or battery diagnostic UI | P1 / M | Runtime readings require device |
+| Host battery, charging, low-power and thermal status / H,A | P | [HostDeviceBridge.swift](../ios/Henge/HostDeviceBridge.swift), [device-menu.m](../tools/device-menu.m), [device-integration.md](device-integration.md): live guest menu; no native IOKit/SMC battery device | P1 / M | State/settings fixtures pass locally; real readings need device |
+| Host audio/video output and peripheral status / H,A | P | Generic active audio routes, active external VM rendering and keyboard/mouse/controller presence; no cable/USB enumeration | P1 / M | Protocol fixtures; hot-plug/device validation required |
+| VM audio gain/mute and physical screen brightness / H,A | P | [audio_gain.h](../host/audio_gain.h), foreground controls, revision/expiry mailbox; explicit guest permission, per-VM gain. Native system volume remains read-only in guest; real MPVolumeView in Henge | P1 / M | Sanitized PCM/state and Swift preference tests pass; SDK/guest/device checks recorded with build |
 | Media/function keys / H,V,G | P | HardwareKeys forwards available HID key usages; reserved system keys may be consumed by iPadOS. Consumer-page media forwarding is incomplete | P1 / M | Hardware keyboard QA required |
 
 ## Apple services and data safety

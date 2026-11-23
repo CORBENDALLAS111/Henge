@@ -53,6 +53,7 @@ Then a Henge folder in the Mac's home folder is the same folder as Files › Hen
 ## Known limits
 
 - See the [macOS and Sidecar feature audit](docs/MACOS_FEATURE_PARITY.md) for branch dependencies, implementation boundaries and physical-device verification requirements.
+- [Host device integration](docs/device-integration.md) adds charge/output status and optional brightness/VM audio controls through the updated guest helper; physical-device acceptance is pending.
 - [Pencil, connected-device input and Shared Files drag-and-drop](docs/pencil-devices-files.md) have experimental bridges; on-device compatibility is not yet verified.
 - Signing in to an Apple Account inside macOS can fail with a verification error. An opt-in [Ventura 13.6 experiment](docs/ventura-account-experiment.md) supports compatible new or existing VMs without resetting their data; sign-in and App Store downloads remain unverified.
   See [Apple services diagnostics and platform limits](docs/apple-services.md).
