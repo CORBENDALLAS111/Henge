@@ -46,7 +46,9 @@ struct GuestTouchObject: Equatable {
     /// nil means the provider couldn't tell. It must not be treated as readonly.
     var keyboardEditable: Bool? {
         if capabilities.contains(.disabled) { return false }
-        if kind == .unknown { return nil }
+        // A container or row can expose a more specific editor only after the
+        // click. Keep the fresh-focus fallback for these aggregate objects.
+        if [.unknown, .scroll, .item].contains(kind) { return nil }
         if kind == .textField || kind == .textArea {
             return capabilities.contains(.editabilityKnown) ? capabilities.contains(.editable) : nil
         }

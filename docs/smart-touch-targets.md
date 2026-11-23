@@ -64,6 +64,7 @@ and a new helper falls back to V1 when an older host has no V2 endpoint.
 | Text field / text area | Report selectable/editable status; Keyboard → On text fields still requires a delivered click and a fresh focused-field report |
 | Readonly / disabled / known non-text controls | Do not open the text-field keyboard from that click |
 | Unknown editability | Preserve focus-based behavior; failure to query a capability is not treated as a readonly declaration |
+| Container / row without a specific text child | Preserve fresh-focus detection for editors that appear only after clicking |
 | Row / cell / Dock item / selectable text | Report the object kind and available metadata; arbitrary file/image drag intent is not universally exposed |
 
 The agent inspects declared action names and whether value/selected-text

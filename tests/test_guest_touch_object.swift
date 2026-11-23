@@ -12,6 +12,8 @@ import Foundation
         precondition(object(7, 32)?.keyboardEditable == false)
         precondition(object(9, 16)?.keyboardEditable == false)
         precondition(object(0, 0)?.keyboardEditable == nil, "legacy hints keep focus-based keyboard behavior")
+        precondition(object(3, 2)?.keyboardEditable == nil && object(12, 0)?.keyboardEditable == nil,
+                     "containers and rows may expose an editor only after the click")
         precondition(object(4, 65)?.preciseDrag == true)
         precondition(object(9, 16)?.isolatedPress == true)
         precondition(object(9, 18)?.isolatedPress == false, "button in scroll container must permit scrolling")
