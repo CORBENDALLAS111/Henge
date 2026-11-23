@@ -201,7 +201,7 @@ Code revision: [`05d3580eff64eeb6d6b710f368d69dfae00a8823`](https://github.com/C
 
 [TIPA artifact 14775423016](https://github.com/CORBENDALLAS111/Henge/actions/runs/45076370533/artifacts/14775423016) was also produced by the existing workflow. No physical iPad/iPhone, Pencil Pro, external monitor, guest Apple Account or affected Ventura application was available for acceptance testing in this session. The twelve physical tests above remain required.
 
-## Latest smart-touch build
+## Verified initial smart-touch build (V1)
 
 The optional guest-assisted role/geometry hit-test bridge is implemented and
 automatically tested in code revision `78fcd4cceb03c50795edd25dbcb368660eaf6c57`.
@@ -214,3 +214,15 @@ It requires updating the guest helper and granting guest Accessibility access;
 it is default-off and remains partial until physical Ventura/iPad validation.
 Unknown/slow providers retain existing gestures. No Touch Bar, Continuity or
 Apple Account compatibility claim is added by this bridge.
+
+## Semantic V2 build blocker (2026-11-23)
+
+Runtime code `2375e943a1807ec854fcec7d7cbf3c841f290767` implements the richer
+object metadata, precise controls, button/scroll precedence and keyboard gating.
+Local Swift object/gesture/keyboard fixtures and sanitized C protocol/policy
+fixtures passed. Both attempts of [workflow 45157757335](https://github.com/CORBENDALLAS111/Henge/actions/runs/45157757335)
+failed before any runner was assigned: `The job was not acquired by Runner of
+type hosted even after multiple attempts`. Complete Apple SDK compilation,
+real V1/V2 host-server integration, native regressions and packaging have not run
+for this revision. No V2 IPA is available, and no physical validation is claimed.
+The earlier verified V1 artifacts above do not contain semantic V2 controls.

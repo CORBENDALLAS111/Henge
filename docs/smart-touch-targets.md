@@ -122,7 +122,7 @@ Ventura System Settings/Safari scroll, window title/border drag, sliders,
 splitters, text selection, Retina/custom resolutions, denied permission,
 unsupported apps and a busy/slow guest. No physical-device success is claimed.
 
-## Verified build
+## Verified initial smart-touch build (V1)
 
 Code revision [`78fcd4cceb03c50795edd25dbcb368660eaf6c57`](https://github.com/CORBENDALLAS111/Henge/commit/78fcd4cceb03c50795edd25dbcb368660eaf6c57)
 passed [workflow 45083388413](https://github.com/CORBENDALLAS111/Henge/actions/runs/45083388413)
@@ -138,7 +138,24 @@ packaged arm64 guest helper's new touch-target channel. IPA SHA-256:
 
 `45eecd4c2ab1a484dd11c731973edcf4c061f4905273b39c73a72a66b98ab14d`
 
-Later changes record documentation and Make header dependencies; executable
-sources are unchanged from the built revision. Physical Ventura/iPad hit-test
+This artifact contains the initial V1 drag/scroll bridge, preceding the semantic
+V2 controls described above. Physical Ventura/iPad hit-test
 accuracy and latency remain acceptance work, including Retina/custom resolution,
 window titles/edges, Safari/System Settings, controls and custom-drawn apps.
+
+## Semantic V2 verification status
+
+Runtime implementation: `2375e943a1807ec854fcec7d7cbf3c841f290767`.
+Portable Swift object/gesture/keyboard tests and ASan/UBSan C protocol/policy
+fixtures pass locally. Real sharing-server V1/V2 integration, complete Apple SDK
+compilation and IPA packaging are part of [workflow 45157757335](https://github.com/CORBENDALLAS111/Henge/actions/runs/45157757335).
+
+On 2026-11-23 the first workflow attempt did not start a runner and ended with
+the infrastructure annotation: `The job was not acquired by Runner of type
+hosted even after multiple attempts`. No Apple SDK tests executed in that
+attempt. The single retry also ended with the same infrastructure annotation
+without starting a runner (job 137644183280, completed 2026-11-23 11:10 UTC).
+Neither attempt executed Apple SDK, real server integration, native regression
+or packaging steps. These checks remain blocked, rather than passed.
+There is no verified V2 IPA yet; the V1 artifact above does not contain the new
+semantic controls. Physical-device acceptance is also still required.
