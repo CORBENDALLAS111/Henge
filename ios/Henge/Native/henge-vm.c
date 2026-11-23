@@ -429,6 +429,7 @@ int henge_share_focus(double bounds[4], double *age) { return hv_share_focus(bou
 void henge_share_set_target_enabled(int enabled) { hv_share_set_target_enabled(enabled); }
 uint64_t henge_share_target_request(double x,double y) { return hv_share_target_request(x,y); }
 int henge_share_target_result(uint64_t id) { return hv_share_target_result(id); }
+int henge_share_target_object(uint64_t id,int *kind,uint32_t *capabilities,double bounds[4]) { return hv_share_target_object(id,kind,capabilities,bounds); }
 void henge_share_target_cancel(uint64_t id) { hv_share_target_cancel(id); }
 long henge_share_agent_seen(void) { return hv_share_agent_seen(); }
 

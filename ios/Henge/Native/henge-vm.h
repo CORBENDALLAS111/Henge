@@ -83,6 +83,7 @@ int henge_share_focus(double bounds[4], double *age);
 void henge_share_set_target_enabled(int enabled);
 uint64_t henge_share_target_request(double x,double y);
 int henge_share_target_result(uint64_t id);
+int henge_share_target_object(uint64_t id,int *kind,uint32_t *capabilities,double bounds[4]);
 void henge_share_target_cancel(uint64_t id);
 
 /* The size macOS is told its screen is. Before henge_vm_boot. */

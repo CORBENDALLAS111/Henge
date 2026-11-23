@@ -25,6 +25,9 @@ struct DirectContactGesture {
     private var tapDrag = false
     private var targetHint = TargetHint.automatic
     private var targetPending = false
+    private var targetObject: GuestTouchObject?
+    private var pressFrame: CGRect?
+    private var dragThreshold: CGFloat { targetObject?.preciseDrag == true ? 2 : tool == .finger ? 10 : 4 }
     var awaitingTarget: Bool { phase == .pending && targetPending }
     static let scrollKey = "henge.touch.oneFingerScrolling"
     static let defaultOneFingerScrolling = true
@@ -39,9 +42,15 @@ struct DirectContactGesture {
 
     /// A reply belongs only to this still-undecided contact. Never change a
     /// button/gesture already delivered to macOS, or apply a late app response.
-    @discardableResult mutating func resolveTarget(_ hint: TargetHint, time: TimeInterval) -> Bool {
+    @discardableResult mutating func resolveTarget(_ hint: TargetHint, time: TimeInterval,
+                                                  object: GuestTouchObject? = nil, imageFrame: CGRect? = nil) -> Bool {
         guard awaitingTarget, time.isFinite, time >= began, time - began <= Self.targetWait else { return false }
         targetPending = false; targetHint = hint
+        targetObject = object
+        if let object, object.isolatedPress, let imageFrame {
+            let frame = object.frame(in: imageFrame)
+            if !frame.isEmpty && frame.contains(origin) { pressFrame = frame }
+        }
         return true
     }
     mutating func expireTarget() { targetPending = false }
@@ -58,6 +67,7 @@ struct DirectContactGesture {
         self.tool = tool; origin = point; began = time; phase = .pending
         scrollSwipes = scrollFingerSwipes && tool == .finger
         targetHint = .automatic
+        targetObject = nil; pressFrame = nil
         targetPending = scrollSwipes && awaitTarget
         tapDrag = false
         if scrollSwipes, let tap = previousTap, time.isFinite, time >= tap.time,
@@ -78,8 +88,13 @@ struct DirectContactGesture {
         if let time, !time.isFinite || time < began { return [] }
         switch phase {
         case .pending:
-            let distance = hypot(point.x - origin.x, point.y - origin.y)
-            guard distance >= (tool == .finger ? 10 : 4) else { return [] }
+            if !tapDrag, let pressFrame {
+                if !pressFrame.contains(point) { phase = .consumed }
+                return [] // a button without a scroll ancestor is a press, not a swipe
+            }
+            let projected = dragPoint(point)
+            let distance = hypot(projected.x - origin.x, projected.y - origin.y)
+            guard distance >= dragThreshold else { return [] }
             if targetPending {
                 if let time, time - began < Self.targetWait { return [] }
                 targetPending = false
@@ -90,8 +105,8 @@ struct DirectContactGesture {
                 return [.scrollBegin(origin, time: began), .scroll(point, time: time)]
             }
             phase = .dragging
-            return [.down(origin), .move(point)]
-        case .dragging: return [.move(point)]
+            return [.down(origin), .move(dragPoint(point))]
+        case .dragging: return [.move(dragPoint(point))]
         case .scrolling: return [.scroll(point, time: time ?? began)]
         default: return []
         }
@@ -106,10 +121,16 @@ struct DirectContactGesture {
         switch phase {
         case .pending:
             guard point.x.isFinite, point.y.isFinite, time.isFinite, time >= began else { return [] }
+            if !tapDrag, let pressFrame {
+                guard pressFrame.contains(point) else { return [] }
+                if scrollSwipes && time - began < Self.contextDelay { previousTap = (origin, time) }
+                return [.click(origin, count: 1, secondary: time - began >= Self.contextDelay)]
+            }
             // A flick can end before UIKit supplies a move sample. It is not a
             // stationary tap and must not click or auto-open the keyboard.
-            guard hypot(point.x - origin.x, point.y - origin.y) < (tool == .finger ? 10 : 4) else {
-                if tapDrag || targetHint == .drag { return [.down(origin), .move(point), .up(point)] }
+            let projected = dragPoint(point)
+            guard hypot(projected.x - origin.x, projected.y - origin.y) < dragThreshold else {
+                if tapDrag || targetHint == .drag { let p = dragPoint(point); return [.down(origin), .move(p), .up(p)] }
                 if scrollSwipes, targetHint == .scroll || time - began < Self.dragDelay {
                     return [.scrollBegin(origin, time: began), .scroll(point, time: time), .scrollEnd(time: time)]
                 }
@@ -120,10 +141,16 @@ struct DirectContactGesture {
             if scrollSwipes, duration < Self.contextDelay { previousTap = (origin, time) }
             return [.click(origin, count: tool == .pencil && duration >= Self.pencilDoubleDelay ? 2 : 1,
                            secondary: tool == .finger && duration >= Self.contextDelay)]
-        case .dragging: return [.move(point), .up(point)]
+        case .dragging: let p = dragPoint(point); return [.move(p), .up(p)]
         case .scrolling: return [.scroll(point, time: time), .scrollEnd(time: time)]
         default: return []
         }
     }
-    mutating func reset() { phase = .idle; previousTap = nil; tapDrag = false; targetPending = false; targetHint = .automatic }
+    private func dragPoint(_ point: CGPoint) -> CGPoint {
+        guard let targetObject, targetObject.preciseDrag, [.slider, .scrollbar].contains(targetObject.kind) else { return point }
+        if targetObject.capabilities.contains(.horizontal) { return CGPoint(x: point.x, y: origin.y) }
+        if targetObject.capabilities.contains(.vertical) { return CGPoint(x: origin.x, y: point.y) }
+        return point
+    }
+    mutating func reset() { phase = .idle; previousTap = nil; tapDrag = false; targetPending = false; targetHint = .automatic; targetObject = nil; pressFrame = nil }
 }

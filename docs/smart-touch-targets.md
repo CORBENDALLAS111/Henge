@@ -43,7 +43,39 @@ coordinates and inspects a bounded parent chain. Roles are public accessibility
 Only role identifiers, positions/sizes and capability booleans are inspected.
 The helper does not read titles, labels, URLs, field values, selected text or
 document contents, and does not execute Accessibility actions or move the mouse.
-The host receives only a request ID and one fixed intent code.
+The host receives a request ID, fixed intent/object/capability codes and
+normalized object bounds. It receives no raw accessibility strings or contents.
+
+## Semantic object reports (V2)
+
+The newer helper also describes what was hit, rather than sending only a binary
+drag/scroll recommendation. `/.henge/touch-target-v2` carries eight bounded fields:
+`requestID intent kind capabilities x y width height`. The separate V1 endpoint
+keeps its original two-integer reply; old helpers keep working with the new host,
+and a new helper falls back to V1 when an older host has no V2 endpoint.
+
+| Object reported by macOS | Henge behavior |
+|---|---|
+| Exposed window title / resize edge | Move or resize using the existing absolute input |
+| Slider / scrollbar | Two-point movement threshold; horizontal/vertical movement follows the control's reported axis |
+| Splitter / resize handle | Fine movement without assuming the bar's orientation is its movement axis |
+| Button / checkbox / radio / popup / link outside scroll content | Keep a press while moving inside its reported bounds; leaving cancels the pending press |
+| Button or link inside scroll content | Tap activates; a swipe still scrolls the container |
+| Text field / text area | Report selectable/editable status; Keyboard → On text fields still requires a delivered click and a fresh focused-field report |
+| Readonly / disabled / known non-text controls | Do not open the text-field keyboard from that click |
+| Unknown editability | Preserve focus-based behavior; failure to query a capability is not treated as a readonly declaration |
+| Row / cell / Dock item / selectable text | Report the object kind and available metadata; arbitrary file/image drag intent is not universally exposed |
+
+The agent inspects declared action names and whether value/selected-text
+attributes are settable; it does not read those values or execute those actions.
+Disabled controls discard press/drag/edit capabilities. Geometry and capability
+combinations are validated on both host and Swift sides. Explicit tap-then-drag,
+Pencil policy, manual keyboard preference and the contact deadline remain.
+
+This is not a universal macOS “this pixel is draggable” API: some roles provide
+clear semantics and custom canvases do not. Unknown or incomplete providers
+retain the existing gestures. V2 accuracy and fine-control ergonomics require
+physical Ventura/iPad testing.
 
 ## Timing and ownership
 
@@ -78,6 +110,10 @@ need physical-device tuning rather than being presented as measured latency.
   old-helper fallback, duplicate rejection and session cancellation.
 - `tests/test_direct_contact_gesture.swift`: smart drag/scroll, timeout replay,
   late replies, stationary clicks, explicit tap-drag and Pencil isolation.
+- `ios/Henge/GuestTouchObject.swift`, `tests/test_guest_touch_object.swift`:
+  validated object descriptors, readonly/unknown distinction, coordinate mapping
+  and capabilities. Contact tests exercise fine-axis controls and press/scroll
+  precedence; keyboard tests reject non-text targets without trusting stale focus.
 
 The existing IPA workflow compiles the macOS helper, runs the tests and verifies
 that the packaged helper contains the new channel. Device tests still required:

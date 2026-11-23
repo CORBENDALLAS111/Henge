@@ -84,6 +84,15 @@ int hv_share_target_result(uint64_t id) {
     int hint=hv_target_result(&target,id,focus_now());
     pthread_mutex_unlock(&target_mu); return hint;
 }
+int hv_share_target_object(uint64_t id,int *kind,uint32_t *capabilities,double bounds[4]) {
+    pthread_mutex_lock(&target_mu);
+    int hint=hv_target_result(&target,id,focus_now());
+    HvTouchObject o=hint==HV_TARGET_UNAVAILABLE ? (HvTouchObject){0} : target.object;
+    if(kind) *kind=o.kind;
+    if(capabilities) *capabilities=o.capabilities;
+    if(bounds) { bounds[0]=o.x; bounds[1]=o.y; bounds[2]=o.width; bounds[3]=o.height; }
+    pthread_mutex_unlock(&target_mu); return hint;
+}
 void hv_share_target_cancel(uint64_t id) {
     pthread_mutex_lock(&target_mu);
     if(target.active==id) target.active=0;
@@ -769,7 +778,8 @@ static int clipboard_put(Conn *c, Request *r) {
 
 static int serve_henge(Conn *c, Request *r) {
     const char *what = r->path + strlen("/.henge/");
-    if (!strcmp(what,"touch-target") && !strcmp(r->method,"GET")) {
+    int target_v2=!strcmp(what,"touch-target-v2");
+    if ((!strcmp(what,"touch-target") || target_v2) && !strcmp(r->method,"GET")) {
         if(body_discard(c,r)!=0) return -1;
         unsigned long long since=0;
         if(r->query[0]) {
@@ -794,13 +804,14 @@ static int serve_henge(Conn *c, Request *r) {
         return n ? respond(c,r,200,"OK","Content-Type: text/plain\r\n",text,(size_t)n)
                  : respond_empty(c,r,204,"No Content");
     }
-    if (!strcmp(what,"touch-target") && !strcmp(r->method,"PUT")) {
-        if(r->chunked || r->length<1 || r->length>=80) { r->close=1; return respond_empty(c,r,400,"Bad Request"); }
+    if ((!strcmp(what,"touch-target") || target_v2) && !strcmp(r->method,"PUT")) {
+        if(r->chunked || r->length<1 || r->length>=(target_v2?240:80)) { r->close=1; return respond_empty(c,r,400,"Bad Request"); }
         size_t n=0; char *body=body_small(c,r,&n); if(!body) return -1;
-        uint64_t id=0; int hint=0,valid=hv_target_parse_answer(body,n,&id,&hint); free(body);
+        uint64_t id=0; int hint=0; HvTouchObject object={0};
+        int valid=target_v2 ? hv_target_parse_object(body,n,&id,&hint,&object) : hv_target_parse_answer(body,n,&id,&hint); free(body);
         if(!valid) return respond_empty(c,r,400,"Bad Request");
         pthread_mutex_lock(&target_mu);
-        int enabled=target.enabled,accepted=hv_target_answer(&target,id,hint,focus_now());
+        int enabled=target.enabled,accepted=hv_target_answer_object(&target,id,hint,object,focus_now());
         pthread_mutex_unlock(&target_mu);
         return respond_empty(c,r,!enabled?403:accepted?204:409,!enabled?"Forbidden":accepted?"No Content":"Conflict");
     }

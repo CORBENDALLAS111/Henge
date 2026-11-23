@@ -22,7 +22,7 @@ struct TouchControlOptions: View {
             Toggle("One-finger scrolling", isOn: $oneFingerScrolling)
             if oneFingerScrolling {
                 Toggle("Smart drag and scroll (guest helper)", isOn: $smartTargets)
-                Text("Experimental. Update Shared Files & Clipboard's guest helper and allow it in macOS Accessibility. The helper checks the role under your finger: draggable controls and window titles drag, scroll areas scroll. Unsupported or slow apps use the normal gestures. Only roles and geometry are read.")
+                Text("Experimental. Update the guest helper in Details, Sharing, and allow it in macOS Accessibility. Recognizes text fields, buttons, sliders and scroll areas. Sliders move precisely along their reported axis. Choose Keyboard → On text fields for the automatic keyboard. Unsupported or slow apps keep the normal gestures; field contents are not read.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Text(oneFingerScrolling

@@ -33,6 +33,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var targetQuery: UInt64 = 0
         private var targetPoll: DispatchWorkItem?
         private var deferredMotion: (point: CGPoint, time: TimeInterval)?
+        private var targetObject: GuestTouchObject?
         private var fingerStartedAt: TimeInterval?
         private var multiTapPoint: CGPoint?
         private var scroll = OneFingerScroll()
@@ -123,6 +124,7 @@ struct DirectTouchSurface: UIViewRepresentable {
         }
         func reset() {
             cancelTargetQuery()
+            targetObject = nil
             pendingDown?.cancel(); pendingDown = nil
             pendingLeave?.cancel(); pendingLeave = nil
             classifier.reset()
@@ -147,9 +149,14 @@ struct DirectTouchSurface: UIViewRepresentable {
         private func pollTarget(_ id: UInt64, began: TimeInterval) {
             guard id != 0, targetQuery == id, primary?.type == .direct, !multi, usable else { cancelTargetQuery(); return }
             let now = ProcessInfo.processInfo.systemUptime
-            let hint = henge_share_target_result(id)
+            var kind: Int32 = 0, capabilities: UInt32 = 0
+            var rect = [Double](repeating: 0, count: 4)
+            let hint = rect.withUnsafeMutableBufferPointer { henge_share_target_object(id, &kind, &capabilities, $0.baseAddress) }
             if hint != -2 || now - began >= DirectContactGesture.targetWait || !classifier.awaitingTarget {
-                _ = classifier.resolveTarget(DirectContactGesture.TargetHint(rawValue: hint) ?? .automatic, time: now)
+                let object = GuestTouchObject(kind: kind, capabilities: capabilities,
+                                             bounds: CGRect(x: rect[0], y: rect[1], width: rect[2], height: rect[3]))
+                if classifier.resolveTarget(DirectContactGesture.TargetHint(rawValue: hint) ?? .automatic,
+                                            time: now, object: object, imageFrame: imageBounds) { targetObject = object }
                 let motion = deferredMotion
                 cancelTargetQuery()
                 if let motion { perform(classifier.move(motion.point, time: motion.time)) }
@@ -241,9 +248,11 @@ struct DirectTouchSurface: UIViewRepresentable {
                               send(p, flags: range | Int32(HENGE_PEN_DESKTOP_UP)) else { return }
                     }
                     if !secondary {
-                        NotificationCenter.default.post(name: SessionKeyboard.directTap, object: nil, userInfo: [
+                        var info: [String: Any] = [
                             "x": Double((p.x - imageBounds.minX) / max(imageBounds.width, 1)),
-                            "y": Double((p.y - imageBounds.minY) / max(imageBounds.height, 1))])
+                            "y": Double((p.y - imageBounds.minY) / max(imageBounds.height, 1))]
+                        if let editable = targetObject?.keyboardEditable { info["editable"] = editable }
+                        NotificationCenter.default.post(name: SessionKeyboard.directTap, object: nil, userInfo: info)
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
@@ -300,6 +309,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             if fingers.count >= 2 {
                 if !multi {
                     cancelTargetQuery()
+                    targetObject = nil
                     let allowContextTap = !contact && (primary.map { classifier.canJoinContextTap(at: $0.location(in: self)) } ?? true)
                     pendingDown?.cancel(); pendingDown = nil
                     sendScroll(scroll.end(time: first.timestamp))
@@ -310,6 +320,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             }
             primary = first; startPoint = first.location(in: self); lastPoint = startPoint
             cancelTargetQuery()
+            targetObject = nil
             if smartTargets && oneFingerScrolling {
                 targetQuery = henge_share_target_request(Double((startPoint.x - imageBounds.minX) / imageBounds.width),
                                                        Double((startPoint.y - imageBounds.minY) / imageBounds.height))
@@ -410,6 +421,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             pendingDown?.cancel(); pendingDown = nil
             showTouch(nil)
             primary = nil; contact = false; fingers.subtract(touches)
+            targetObject = nil
             StickyKeys.shared.releaseAfterPointer()
         }
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { reset() }

@@ -145,6 +145,13 @@ bounded asynchronous query. It preserves tap-then-drag and falls back for old
 helpers, denied permission, unknown apps or late replies. It is experimental,
 requires updating the guest helper, and has no physical-device acceptance yet.
 
+The V2 follow-up additionally exports typed object/capability/geometry metadata
+for text fields, text areas, buttons, toggles, links, sliders, scrollbars,
+splitters, window controls and rows/cells. It implements precise control motion,
+standalone-button press handling and semantic gating of the text-field keyboard.
+V1 remains compatible. Metadata cannot prove universal draggability in custom
+apps; physical acceptance remains pending.
+
 “Required” means a physical-device test remains. CI on a Mac and simulated HID queues do not establish it.
 
 | Acceptance case | Automated evidence | Physical iPad/iPhone / guest test |

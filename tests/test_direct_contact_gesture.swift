@@ -179,6 +179,30 @@ import CoreGraphics
         precondition(smart.move(moved, time: 146.03) == [.scrollBegin(p, time: 146), .scroll(moved, time: 146.03)], "unsupported or permission-denied apps retain normal gestures")
         smart.reset()
         precondition(!smart.resolveTarget(.drag, time: 146.04))
-        print("PASS: contact/tap-drag, context/multitouch, target intent, timeout replay, late reply rejection and Pencil isolation")
+        let image = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        let slider = GuestTouchObject(kind: 4, capabilities: 65, bounds: CGRect(x: 0, y: 0, width: 1, height: 1))!
+        smart.begin(p, tool: .finger, time: 150, scrollFingerSwipes: true, awaitTarget: true)
+        precondition(smart.resolveTarget(.drag, time: 150.01, object: slider, imageFrame: image))
+        precondition(smart.move(CGPoint(x: 100, y: 208), time: 150.02).isEmpty, "cross-axis jitter cannot start a slider drag")
+        precondition(smart.move(CGPoint(x: 103, y: 209), time: 150.03) == [.down(p), .move(CGPoint(x: 103, y: 200))], "slider moves after two points, aligned to its reported axis")
+        precondition(smart.end(CGPoint(x: 104, y: 210), time: 150.04) == [.move(CGPoint(x: 104, y: 200)), .up(CGPoint(x: 104, y: 200))])
+        let button = GuestTouchObject(kind: 9, capabilities: 16, bounds: CGRect(x: 0.09, y: 0.19, width: 0.1, height: 0.04))!
+        smart.begin(p, tool: .finger, time: 151, scrollFingerSwipes: true, awaitTarget: true)
+        precondition(smart.resolveTarget(.automatic, time: 151.01, object: button, imageFrame: image))
+        precondition(smart.move(CGPoint(x: 125, y: 200), time: 151.02).isEmpty)
+        precondition(smart.end(CGPoint(x: 125, y: 200), time: 151.03) == [.click(p, count: 1, secondary: false)], "motion inside a standalone button remains a press")
+        smart.reset(); smart.begin(p, tool: .finger, time: 152, scrollFingerSwipes: true, awaitTarget: true)
+        _ = smart.resolveTarget(.automatic, time: 152.01, object: button, imageFrame: image)
+        precondition(smart.move(CGPoint(x: 250, y: 200), time: 152.02).isEmpty)
+        precondition(smart.end(p, time: 152.03).isEmpty, "leaving a button cancels its pending press")
+        let scrollingButton = GuestTouchObject(kind: 9, capabilities: 18, bounds: button.bounds)!
+        smart.reset(); smart.begin(p, tool: .finger, time: 153, scrollFingerSwipes: true, awaitTarget: true)
+        _ = smart.resolveTarget(.scroll, time: 153.01, object: scrollingButton, imageFrame: image)
+        precondition(smart.move(moved, time: 153.02) == [.scrollBegin(p, time: 153), .scroll(moved, time: 153.02)], "button in scroll content must still allow scrolling")
+        let splitter = GuestTouchObject(kind: 6, capabilities: 129, bounds: CGRect(x: 0, y: 0, width: 1, height: 1))!
+        smart.reset(); smart.begin(p, tool: .finger, time: 154, scrollFingerSwipes: true, awaitTarget: true)
+        _ = smart.resolveTarget(.drag, time: 154.01, object: splitter, imageFrame: image)
+        precondition(smart.move(CGPoint(x: 103, y: 200), time: 154.02) == [.down(p), .move(CGPoint(x: 103, y: 200))], "splitter orientation describes its bar, not necessarily movement axis")
+        print("PASS: contact/tap-drag, semantic press/scroll/precise controls, target timeout/replay and Pencil isolation")
     }
 }

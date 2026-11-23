@@ -59,6 +59,7 @@ struct SessionView: View {
     @State private var keyboardPanStart: CGFloat?
     @State private var keyboardTapAt: TimeInterval?
     @State private var keyboardTapPoint: CGPoint?
+    @State private var keyboardTapEditable: Bool?
     @State private var zoomed = false
     @State private var showDetails = false
     @State private var showFiles = false
@@ -266,6 +267,7 @@ struct SessionView: View {
             guard touchInputActive, !display.isExternal,
                   let x = note.userInfo?["x"] as? Double, let y = note.userInfo?["y"] as? Double else { return }
             keyboardTapPoint = CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            keyboardTapEditable = note.userInfo?["editable"] as? Bool
             keyboardTapAt = ProcessInfo.processInfo.systemUptime
         }
         .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil; keyboardTapPoint = nil } }
@@ -427,7 +429,8 @@ struct SessionView: View {
                 switch request.resolve(now: ProcessInfo.processInfo.systemUptime, inputActive: touchInputActive,
                                        penIdle: henge_vm_pen_idle() != 0, mode: keyboardMode,
                                        keyboardVisible: typing, focusStatus: focused, focusAge: age,
-                                       focusBounds: CGRect(x: CGFloat(rect[0]), y: CGFloat(rect[1]), width: CGFloat(rect[2]), height: CGFloat(rect[3]))) {
+                                       focusBounds: CGRect(x: CGFloat(rect[0]), y: CGFloat(rect[1]), width: CGFloat(rect[2]), height: CGFloat(rect[3])),
+                                       targetEditable: keyboardTapEditable) {
                 case .wait: break
                 case .discard: keyboardTapAt = nil; keyboardTapPoint = nil
                 case .apply(let target, let open):

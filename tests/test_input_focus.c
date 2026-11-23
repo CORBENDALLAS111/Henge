@@ -18,12 +18,12 @@ static int call(const char *socket_path,const char *method,const char *path,cons
     while(have<4095 && (got=recv(fd,response+have,4095-have,0))>0) have+=got;
     close(fd); response[have]=0; int code=0; assert(sscanf(response,"HTTP/1.1 %d",&code)==1); return code;
 }
-typedef struct { const char *socket; char response[4096]; int code; } TargetClient;
+typedef struct { const char *socket,*path; char response[4096]; int code; } TargetClient;
 static void *follow_target(void *arg) {
     TargetClient *client=arg;
     // Instant Resume may restore an agent with a larger ID from another host
     // process. A current request must still wake it, not wait for that counter.
-    client->code=call(client->socket,"GET","/.henge/touch-target?since=18446744073709551615","",client->response);
+    client->code=call(client->socket,"GET",client->path ? client->path : "/.henge/touch-target?since=18446744073709551615","",client->response);
     return NULL;
 }
 int main(void) {
@@ -65,6 +65,20 @@ int main(void) {
     assert(call(sock,"PUT","/.henge/touch-target",answer,response)==409); // duplicate cannot change intent
     hv_share_target_cancel(id);
     assert(hv_share_target_result(id)==-2);
+    TargetClient semantic={.socket=sock,.path="/.henge/touch-target-v2?since=18446744073709551615"};
+    assert(!pthread_create(&worker,NULL,follow_target,&semantic));
+    uint64_t newer=hv_share_target_request(.4,.5); assert(newer && newer!=id);
+    pthread_join(worker,NULL); assert(semantic.code==200);
+    char detail[180]; snprintf(detail,sizeof detail,"%llu 1 4 65 .1 .2 .3 .4",(unsigned long long)newer);
+    assert(call(sock,"PUT","/.henge/touch-target",detail,response)==400); // V1 stays strict
+    assert(call(sock,"PUT","/.henge/touch-target-v2",answer,response)==400); // V2 requires an object
+    assert(call(sock,"PUT","/.henge/touch-target-v2",detail,response)==204);
+    int kind=0; uint32_t caps=0; double geometry[4];
+    assert(hv_share_target_object(newer,&kind,&caps,geometry)==1 && kind==4 && caps==65 && geometry[0]==.1 && geometry[3]==.4);
+    assert(hv_share_target_result(newer)==1); // scalar API remains compatible
+    assert(hv_share_target_object(id,&kind,&caps,geometry)==-2 && kind==0 && caps==0 && geometry[0]==0);
+    hv_share_target_cancel(newer);
+    assert(hv_share_target_object(newer,&kind,&caps,geometry)==-2 && kind==0 && caps==0);
     hv_share_set_target_enabled(0);
     assert(call(sock,"PUT","/.henge/touch-target",answer,response)==403);
     hv_share_set_target_enabled(1);

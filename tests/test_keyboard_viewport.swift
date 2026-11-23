@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 @main struct KeyboardViewportTests {
     static func main() {
@@ -21,8 +23,8 @@ import CoreGraphics
         let invalid=KeyboardViewport.frame(base,keyboard:keyboard,focus:CGPoint(x:0,y:CGFloat.nan),pan:CGFloat.nan)
         precondition(invalid.minY.isFinite && invalid.size==base.size)
         let target=CGPoint(x:0.5,y:0.9), request=KeyboardTapRequest(point:CGPoint(x:0.5,y:0.9),began:10)
-        func decision(_ time: Double, idle: Bool, mode: String="tap", visible: Bool=false, status: Int32=1, age: Double=0) -> KeyboardTapRequest.Decision {
-            request.resolve(now:time,inputActive:true,penIdle:idle,mode:mode,keyboardVisible:visible,focusStatus:status,focusAge:age,focusBounds:CGRect(x:0.4,y:0.8,width:0.2,height:0.2))
+        func decision(_ time: Double, idle: Bool, mode: String="tap", visible: Bool=false, status: Int32=1, age: Double=0, editable: Bool?=nil) -> KeyboardTapRequest.Decision {
+            request.resolve(now:time,inputActive:true,penIdle:idle,mode:mode,keyboardVisible:visible,focusStatus:status,focusAge:age,focusBounds:CGRect(x:0.4,y:0.8,width:0.2,height:0.2),targetEditable:editable)
         }
         precondition(decision(10.2,idle:false) == .wait, "keyboard must not cancel queued clicks")
         precondition(decision(10.2,idle:false,visible:true) == .wait, "an already open keyboard cannot remap a pending click")
@@ -32,6 +34,12 @@ import CoreGraphics
         precondition(decision(10.4,idle:true,mode:"text",age:0.05) == .apply(target,open:true))
         precondition(decision(10.4,idle:true,mode:"text",status:-1) == .wait, "missing accessibility cannot claim an editable field")
         precondition(decision(12.1,idle:true) == .discard)
+        precondition(decision(10.4,idle:true,mode:"text",editable:false) == .discard, "button/slider/readonly metadata overrides a misleading text focus")
+        precondition(decision(10.4,idle:true,mode:"text",status:0,editable:true) == .wait, "pre-click editable metadata still needs confirmed focus")
+        precondition(decision(10.4,idle:true,mode:"text",age:0.3,editable:true) == .wait)
+        precondition(decision(10.4,idle:true,mode:"text",editable:true) == .apply(target,open:true))
+        precondition(decision(10.4,idle:true,mode:"tap",editable:false) == .apply(target,open:true), "explicit keyboard-on-every-tap preference remains")
+        precondition(decision(10.2,idle:false,mode:"text",editable:false) == .wait, "semantic data cannot remap an undelivered click")
         precondition(request.resolve(now:10.3,inputActive:false,penIdle:true,mode:"tap",keyboardVisible:false,focusStatus:1,focusAge:0,focusBounds:.zero) == .discard)
         precondition(request.resolve(now:10.4,inputActive:true,penIdle:true,mode:"text",keyboardVisible:false,focusStatus:1,focusAge:0,focusBounds:CGRect(x:0,y:0,width:0.2,height:0.2)) == .wait, "focus in another field cannot turn a button tap into keyboard opening")
         precondition(request.resolve(now:10.4,inputActive:true,penIdle:true,mode:"text",keyboardVisible:false,focusStatus:1,focusAge:0,focusBounds:.zero) == .wait, "unknown field geometry cannot claim a text-field tap")

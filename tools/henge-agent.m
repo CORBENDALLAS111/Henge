@@ -192,10 +192,76 @@ static BOOL targetRect(AXUIElementRef element,CGRect *rect) {
     return ok;
 }
 
+/* The report contains fixed kind/capability codes and normalized geometry.
+   Reading action names or settable-attribute flags does not execute actions
+   and does not request the attribute's value. */
+static int describeTarget(NSArray *roles,NSArray *elements,BOOL title,BOOL edge,
+                         BOOL selectable,CGRect screen,double deadline,int hint,HvTouchObject *object) {
+    if(!object) return hint; // legacy host needs no extra AX queries
+    *object=(HvTouchObject){0};
+    if(!roles.count || targetTime()>deadline) return HV_TARGET_UNKNOWN;
+    NSUInteger index=0;
+    for(NSUInteger i=0;i<roles.count;i++) if(hv_touch_object_kind([roles[i] UTF8String])) { index=i; break; }
+    AXUIElementRef element=(__bridge AXUIElementRef)elements[index];
+    CFArrayRef raw=NULL;
+    NSArray *keys=@[(__bridge NSString *)kAXPositionAttribute,(__bridge NSString *)kAXSizeAttribute,
+                    (__bridge NSString *)kAXEnabledAttribute,(__bridge NSString *)kAXOrientationAttribute];
+    AXUIElementCopyMultipleAttributeValues(element,(__bridge CFArrayRef)keys,0,&raw);
+    NSArray *attributes=raw ? CFBridgingRelease(raw) : nil;
+    BOOL enabled=YES; int orientation=0,editable=-1; BOOL press=NO;
+    CGPoint p=CGPointZero; CGSize size=CGSizeZero; BOOL geometry=NO;
+    if(attributes.count==4) {
+        CFTypeRef position=(__bridge CFTypeRef)attributes[0],extent=(__bridge CFTypeRef)attributes[1];
+        if(CFGetTypeID(position)==AXValueGetTypeID() && CFGetTypeID(extent)==AXValueGetTypeID() &&
+           AXValueGetType((AXValueRef)position)==kAXValueCGPointType && AXValueGetType((AXValueRef)extent)==kAXValueCGSizeType)
+            geometry=AXValueGetValue((AXValueRef)position,kAXValueCGPointType,&p) && AXValueGetValue((AXValueRef)extent,kAXValueCGSizeType,&size);
+        CFTypeRef state=(__bridge CFTypeRef)attributes[2];
+        if(CFGetTypeID(state)==CFBooleanGetTypeID()) enabled=CFBooleanGetValue(state);
+        if([attributes[3] isEqual:@"AXHorizontalOrientation"]) orientation=1;
+        if([attributes[3] isEqual:@"AXVerticalOrientation"]) orientation=2;
+    }
+    int kind=hv_touch_object_kind([roles[index] UTF8String]);
+    if((kind==HV_OBJECT_TEXT_FIELD || kind==HV_OBJECT_TEXT_AREA) && targetTime()<deadline) {
+        Boolean writable=false,selectionWritable=false;
+        AXError valueStatus=AXUIElementIsAttributeSettable(element,kAXValueAttribute,&writable);
+        AXError selectionStatus=AXUIElementIsAttributeSettable(element,kAXSelectedTextAttribute,&selectionWritable);
+        if((valueStatus==kAXErrorSuccess && writable) || (selectionStatus==kAXErrorSuccess && selectionWritable)) editable=1;
+        else if(valueStatus==kAXErrorSuccess && selectionStatus==kAXErrorSuccess) editable=0;
+        if(index!=0) {
+            CFArrayRef names=NULL;
+            if(AXUIElementCopyAttributeNames(element,&names)==kAXErrorSuccess && names) {
+                selectable=[(__bridge NSArray *)names containsObject:(__bridge NSString *)kAXSelectedTextRangeAttribute];
+                CFRelease(names);
+            }
+        }
+    }
+    if((kind==HV_OBJECT_BUTTON || kind==HV_OBJECT_TOGGLE || kind==HV_OBJECT_LINK) && targetTime()<deadline) {
+        CFArrayRef actions=NULL;
+        if(AXUIElementCopyActionNames(element,&actions)==kAXErrorSuccess && actions) {
+            press=[(__bridge NSArray *)actions containsObject:(__bridge NSString *)kAXPressAction]; CFRelease(actions);
+        }
+    }
+    const char *names[8]; for(NSUInteger i=0;i<roles.count;i++) names[i]=[roles[i] UTF8String];
+    HvTouchObject o=hv_touch_object_policy(names,roles.count,title,edge,selectable,editable,enabled,press,orientation);
+    if(geometry && isfinite(p.x) && isfinite(p.y) && isfinite(size.width) && isfinite(size.height) && size.width>0 && size.height>0) {
+        double x=fmin(fmax((p.x-screen.origin.x)/screen.size.width,0),1);
+        double y=fmin(fmax((p.y-screen.origin.y)/screen.size.height,0),1);
+        o.x=x; o.y=y;
+        o.width=fmin(fmax((p.x+size.width-screen.origin.x)/screen.size.width-x,0),1-x);
+        o.height=fmin(fmax((p.y+size.height-screen.origin.y)/screen.size.height-y,0),1-y);
+    }
+    if(targetTime()>deadline || !hv_target_object_valid(o)) return HV_TARGET_UNKNOWN;
+    *object=o;
+    if(!enabled) return (o.capabilities & HV_OBJECT_SCROLLABLE) ? HV_TARGET_SCROLL : HV_TARGET_UNKNOWN;
+    if((o.capabilities & HV_OBJECT_EDITABLE) && !(o.capabilities & HV_OBJECT_SCROLLABLE)) return HV_TARGET_DRAG;
+    return hint;
+}
+
 /* The normalized framebuffer point maps to the guest's main display in AX's
    top-left logical coordinate space, including Retina "Looks like" scaling.
    No pointer movement, AX actions, text, titles or field values are requested. */
-static int targetHint(double x,double y) {
+static int targetHint(double x,double y,HvTouchObject *object) {
+    if(object) *object=(HvTouchObject){0};
     if(!AXIsProcessTrusted()) return HV_TARGET_PERMISSION;
     CGRect screen=CGDisplayBounds(CGMainDisplayID());
     if(CGRectIsEmpty(screen)) return HV_TARGET_UNKNOWN;
@@ -218,7 +284,7 @@ static int targetHint(double x,double y) {
         NSString *role=CFBridgingRelease(raw); [roles addObject:role];
         const char *names[8]; for(NSUInteger i=0;i<roles.count;i++) names[i]=[roles[i] UTF8String];
         int direct=hv_touch_role_hint(names,roles.count,0,0,0);
-        if(direct!=HV_TARGET_UNKNOWN) return targetTime()<=deadline ? direct : HV_TARGET_UNKNOWN;
+        if(direct!=HV_TARGET_UNKNOWN) return describeTarget(roles,elements,NO,NO,selectable,screen,deadline,direct,object);
         if([role isEqualToString:@"AXWindow"]) {
             CFTypeRef label=NULL;
             if(AXUIElementCopyAttributeValue(current,kAXTitleUIElementAttribute,&label)==kAXErrorSuccess && label) {
@@ -250,31 +316,37 @@ static int targetHint(double x,double y) {
     if(item) CFRelease(item);
     if(!complete || targetTime()>deadline) return HV_TARGET_UNKNOWN;
     const char *names[8]; for(NSUInteger i=0;i<roles.count;i++) names[i]=[roles[i] UTF8String];
-    return hv_touch_role_hint(names,roles.count,title,edge,selectable);
+    return describeTarget(roles,elements,title,edge,selectable,screen,deadline,
+                          hv_touch_role_hint(names,roles.count,title,edge,selectable),object);
 }
 
 /* Event-driven long poll on a separate queue. Slow or unsupported AX providers
    never block the agent's clipboard, focus reporter, or the host's UI thread. */
 static void followTouchTargets(void) {
-    unsigned long long since=0; BOOL prompted=NO;
+    unsigned long long since=0; BOOL prompted=NO,legacy=NO;
     for(;;) { @autoreleasepool {
         int status=0;
-        NSData *data=request(@"GET",[NSString stringWithFormat:@"/.henge/touch-target?since=%llu",since],nil,&status,NULL);
+        NSString *endpoint=legacy ? @"/.henge/touch-target" : @"/.henge/touch-target-v2";
+        NSData *data=request(@"GET",[NSString stringWithFormat:@"%@?since=%llu",endpoint,since],nil,&status,NULL);
+        if(status==404 && !legacy) { legacy=YES; continue; }
         if(status!=200 || data.length>100) { if(status==403) prompted=NO; if(status!=204) sleep(2); continue; }
         NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         unsigned long long id=0; double x=0,y=0; char extra;
         if(!text || sscanf(text.UTF8String,"%llu %lf %lf %c",&id,&x,&y,&extra)!=3 || !id ||
            !isfinite(x) || !isfinite(y) || x<0 || x>1 || y<0 || y>1) continue;
         since=id;
-        int hint=targetHint(x,y);
+        HvTouchObject object={0};
+        int hint=targetHint(x,y,legacy?NULL:&object);
         if(hint==HV_TARGET_PERMISSION && !prompted) {
             prompted=YES;
             dispatch_async(dispatch_get_main_queue(), ^{
                 AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt:@YES});
             });
         }
-        NSString *reply=[NSString stringWithFormat:@"%llu %d",id,hint];
-        request(@"PUT",@"/.henge/touch-target",[reply dataUsingEncoding:NSUTF8StringEncoding],&status,NULL);
+        NSString *reply=legacy ? [NSString stringWithFormat:@"%llu %d",id,hint]
+            : [NSString stringWithFormat:@"%llu %d %d %u %.9f %.9f %.9f %.9f",id,hint,object.kind,
+               object.capabilities,object.x,object.y,object.width,object.height];
+        request(@"PUT",endpoint,[reply dataUsingEncoding:NSUTF8StringEncoding],&status,NULL);
     } }
 }
 
