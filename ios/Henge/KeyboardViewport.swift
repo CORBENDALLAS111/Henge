@@ -35,7 +35,7 @@ struct KeyboardTapRequest {
         guard inputActive, elapsed >= 0, elapsed <= 2, point.x.isFinite, point.y.isFinite else { return .discard }
         guard elapsed >= 0.18, penIdle else { return .wait }
         if mode == "text", targetEditable == false {
-            return keyboardVisible ? .apply(point, open: false) : .discard
+            return .discard // keep an already visible keyboard and its viewport steady
         }
         let open = mode == "tap" || (mode == "text" && focusStatus == 1 && !focusBounds.isEmpty && focusBounds.contains(point) && focusAge >= 0 && focusAge < elapsed - 0.15)
         if open || keyboardVisible || (mode != "tap" && mode != "text") { return .apply(point, open: open) }

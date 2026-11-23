@@ -49,7 +49,7 @@ struct DirectContactGesture {
         targetObject = object
         if let object, object.isolatedPress, let imageFrame {
             let frame = object.frame(in: imageFrame)
-            if !frame.isEmpty && frame.contains(origin) { pressFrame = frame }
+            if !frame.isEmpty && frame.contains(origin) { pressFrame = frame.insetBy(dx: -4, dy: -4) }
         }
         return true
     }

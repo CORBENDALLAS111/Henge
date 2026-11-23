@@ -203,6 +203,10 @@ import CoreGraphics
         smart.reset(); smart.begin(p, tool: .finger, time: 154, scrollFingerSwipes: true, awaitTarget: true)
         _ = smart.resolveTarget(.drag, time: 154.01, object: splitter, imageFrame: image)
         precondition(smart.move(CGPoint(x: 103, y: 200), time: 154.02) == [.down(p), .move(CGPoint(x: 103, y: 200))], "splitter orientation describes its bar, not necessarily movement axis")
+        let smallButton = GuestTouchObject(kind: 9, capabilities: 16, bounds: CGRect(x: 0.093, y: 0.193, width: 0.014, height: 0.014))!
+        smart.reset(); smart.begin(p, tool: .finger, time: 155, scrollFingerSwipes: true, awaitTarget: true)
+        _ = smart.resolveTarget(.automatic, time: 155.01, object: smallButton, imageFrame: image)
+        precondition(smart.end(CGPoint(x: 110, y: 200), time: 155.04) == [.click(p, count: 1, secondary: false)], "small buttons tolerate touch-up jitter while clicking at the original hit")
         print("PASS: contact/tap-drag, semantic press/scroll/precise controls, target timeout/replay and Pencil isolation")
     }
 }

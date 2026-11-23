@@ -35,6 +35,7 @@ import CoreGraphics
         precondition(decision(10.4,idle:true,mode:"text",status:-1) == .wait, "missing accessibility cannot claim an editable field")
         precondition(decision(12.1,idle:true) == .discard)
         precondition(decision(10.4,idle:true,mode:"text",editable:false) == .discard, "button/slider/readonly metadata overrides a misleading text focus")
+        precondition(decision(10.4,idle:true,mode:"text",visible:true,editable:false) == .discard, "non-text controls cannot pan the already open keyboard viewport")
         precondition(decision(10.4,idle:true,mode:"text",status:0,editable:true) == .wait, "pre-click editable metadata still needs confirmed focus")
         precondition(decision(10.4,idle:true,mode:"text",age:0.3,editable:true) == .wait)
         precondition(decision(10.4,idle:true,mode:"text",editable:true) == .apply(target,open:true))

@@ -59,7 +59,7 @@ and a new helper falls back to V1 when an older host has no V2 endpoint.
 | Exposed window title / resize edge | Move or resize using the existing absolute input |
 | Slider / scrollbar | Two-point movement threshold; horizontal/vertical movement follows the control's reported axis |
 | Splitter / resize handle | Fine movement without assuming the bar's orientation is its movement axis |
-| Button / checkbox / radio / popup / link outside scroll content | Keep a press while moving inside its reported bounds; leaving cancels the pending press |
+| Button / checkbox / radio / popup / link outside scroll content | Keep a press inside its reported bounds with four host points of finger-jitter tolerance; leaving cancels the pending press |
 | Button or link inside scroll content | Tap activates; a swipe still scrolls the container |
 | Text field / text area | Report selectable/editable status; Keyboard → On text fields still requires a delivered click and a fresh focused-field report |
 | Readonly / disabled / known non-text controls | Do not open the text-field keyboard from that click |
