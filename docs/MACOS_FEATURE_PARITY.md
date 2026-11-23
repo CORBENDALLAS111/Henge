@@ -209,7 +209,7 @@ automatically tested in code revision `78fcd4cceb03c50795edd25dbcb368660eaf6c57`
 including real host sharing-server integration, late/stale-response rejection,
 host-relaunch recovery, gesture precedence, iOS SDK, native renderer and VM
 lifecycle checks. [Latest IPA](https://github.com/CORBENDALLAS111/Henge/actions/runs/45083388413/artifacts/14778655727)
-and [setup/verification details](smart-touch-targets.md#verified-build).
+and [setup/verification details](smart-touch-targets.md#verified-initial-smart-touch-build-v1).
 It requires updating the guest helper and granting guest Accessibility access;
 it is default-off and remains partial until physical Ventura/iPad validation.
 Unknown/slow providers retain existing gestures. No Touch Bar, Continuity or
