@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #include "touch-target-policy.h"
+#include "agent-http.h"
 #include <arpa/inet.h>
 #include <math.h>
 #include <netinet/in.h>
@@ -11,6 +12,9 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <time.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <errno.h>
 
 #define HOST "10.0.2.4"
 
@@ -25,16 +29,26 @@ static int send_all(int fd, const void *p, size_t n) {
 }
 
 // One request on its own connection. A plain socket: the server is ours, and URLSession refuses plain HTTP.
-static NSData *request(NSString *method, NSString *path, NSData *body, int *status, unsigned long *seq) {
+NSData *HengeAgentRequest(NSString *method, NSString *path, NSData *body, int *status, unsigned long *seq,double timeoutSeconds) {
+    if(!isfinite(timeoutSeconds) || timeoutSeconds<=0 || timeoutSeconds>40) return nil;
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return nil;
-    struct timeval timeout = {.tv_sec = 40};
+    struct timeval timeout = {.tv_sec = (time_t)timeoutSeconds,.tv_usec=(suseconds_t)((timeoutSeconds-floor(timeoutSeconds))*1e6)};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof timeout);
     int on = 1;
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on);
     struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(80)};
     inet_pton(AF_INET, HOST, &addr.sin_addr);
-    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) != 0) {
+    int original=fcntl(fd,F_GETFL,0),connected=-1;
+    if(original>=0 && fcntl(fd,F_SETFL,original|O_NONBLOCK)==0) {
+        connected=connect(fd,(struct sockaddr *)&addr,sizeof addr);
+        if(connected<0 && errno==EINPROGRESS) {
+            struct pollfd p={.fd=fd,.events=POLLOUT}; int error=0; socklen_t length=sizeof error;
+            if(poll(&p,1,(int)(timeoutSeconds*1000))>0 && getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&length)==0 && !error) connected=0;
+        }
+    }
+    if (connected != 0 || fcntl(fd,F_SETFL,original)!=0) {
         close(fd);
         return nil;
     }
@@ -61,6 +75,9 @@ static NSData *request(NSString *method, NSString *path, NSData *body, int *stat
     if (found.location != NSNotFound && seq) *seq = strtoul(headers.UTF8String + NSMaxRange(found), NULL, 10);
     NSUInteger start = NSMaxRange(end);
     return [all subdataWithRange:NSMakeRange(start, all.length - start)];
+}
+static NSData *request(NSString *method,NSString *path,NSData *body,int *status,unsigned long *seq) {
+    return HengeAgentRequest(method,path,body,status,seq,40);
 }
 
 static NSInteger lastChange;
@@ -352,6 +369,9 @@ static void followTouchTargets(void) {
 
 int main(void) {
     @autoreleasepool {
+        NSApplication *application=NSApplication.sharedApplication;
+        [application setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        HengeStartDeviceMenu();
         lastChange = NSPasteboard.generalPasteboard.changeCount;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ followDevice(); });
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{ followTouchTargets(); });
@@ -359,7 +379,7 @@ int main(void) {
         [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:YES block:^(NSTimer *timer) { (void)timer; checkFocus(); }];
         [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) { (void)timer; checkClipboard(); }];
         [NSTimer scheduledTimerWithTimeInterval:30 repeats:YES block:^(NSTimer *timer) { (void)timer; keepMounted(); }];
-        [NSRunLoop.mainRunLoop run];
+        [application run];
     }
     return 0;
 }

@@ -84,6 +84,33 @@ int main(void) {
     hv_share_set_target_enabled(1);
     assert(!hv_share_target_request(.2,.3)); // previous session's helper freshness is invalid
     hv_share_set_target_enabled(0);
+    // Exercise the actual HTTP server and native bridge, not a mock endpoint.
+    assert(call(sock,"GET","/.henge/device-status","",response)==403);
+    uint64_t device=hv_share_device_begin(1),version=0; int field; double level;
+    assert(device && call(sock,"GET","/.henge/device-status","",response)==503);
+    HvHostDeviceStatus status={.battery=57,.power=2,.host_kind=1,.audio_route=16,.peripherals=3,
+        .system_volume=.8,.brightness=.4,.vm_gain=1};
+    assert(hv_share_device_publish(device,&status));
+    assert(call(sock,"GET","/.henge/device-status","",response)==200 && strstr(response,"Cache-Control: no-store") && strstr(response,"\"battery\":57"));
+    char command[128]; snprintf(command,sizeof command,"%llu 0 1 .5",(unsigned long long)device);
+    assert(call(sock,"PUT","/.henge/device-control","1 0 1 nan",response)==400);
+    assert(call(sock,"PUT","/.henge/device-control",command,response)==202);
+    assert(call(sock,"PUT","/.henge/device-control",command,response)==409);
+    assert(hv_share_device_take(device,&field,&version,&level) && field==0 && version==2 && level==.5);
+    assert(hv_share_device_ack(device,field,version,.5));
+    assert(call(sock,"GET","/.henge/device-status","",response)==200 && strstr(response,"\"vm_gain\":0.500000") && strstr(response,"\"pending\":0"));
+    snprintf(command,sizeof command,"%llu 1 1 0",(unsigned long long)device);
+    assert(call(sock,"PUT","/.henge/device-control",command,response)==202);
+    assert(hv_share_device_take(device,&field,&version,&level) && field==1 && level==0);
+    assert(hv_share_device_ack(device,field,version,0));
+    uint64_t read_only=hv_share_device_begin(0); assert(read_only && read_only!=device);
+    hv_share_device_stop(device); assert(hv_share_device_publish(read_only,&status));
+    snprintf(command,sizeof command,"%llu 0 1 .2",(unsigned long long)read_only);
+    assert(call(sock,"GET","/.henge/device-status","",response)==200);
+    assert(call(sock,"PUT","/.henge/device-control",command,response)==403);
+    assert(!hv_share_device_publish(device,&status));
+    hv_share_device_stop(read_only);
+    assert(call(sock,"GET","/.henge/device-status","",response)==403);
     unlink(sock); rmdir(dir);
-    puts("PASS: opt-in focus/target endpoints, long-poll delivery, metadata validation, no-helper fallback, cancellation and mode reset");
+    puts("PASS: real focus/target and host-device HTTP endpoints, long-poll, validation, controls and session ownership");
 }

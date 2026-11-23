@@ -68,7 +68,7 @@ jobs:
       # stack. Fail here before rebuilding third-party libraries.
       - name: Validate standalone input and file logic
         working-directory: Henge
-        run: make build/henge-agent test-keyboard-input test-touch-target test-guest-touch-object test-apple-account-support test-existing-account-profile test-mdns-proxy test-direct-contact test-one-finger-scroll test-guest-resolution test-pvg-retry test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample test-modifier-ownership test-sidebar
+        run: make build/henge-agent test-host-device test-keyboard-input test-touch-target test-guest-touch-object test-apple-account-support test-existing-account-profile test-mdns-proxy test-direct-contact test-one-finger-scroll test-guest-resolution test-pvg-retry test-absolute-pen test-pencil-proximity test-shared-files test-usb-gamepad test-gamepad-sample test-modifier-ownership test-sidebar
 
       - name: Check stationary clicks through the macOS HID driver
         working-directory: Henge
@@ -190,6 +190,7 @@ jobs:
               assert b'/.henge/focus' in helper and b'/.henge/input-settings' in helper
               assert b'/.henge/touch-target' in helper
               assert b'/.henge/touch-target-v2' in helper
+              assert b'/.henge/device-status' in helper and b'/.henge/device-control' in helper
               print('PASS: IPA integrity, source revision, iOS target, diagnostics and focus-enabled guest helper')
           PY
 

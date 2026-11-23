@@ -54,6 +54,26 @@ static double focus_now(void) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
     return ts.tv_sec + ts.tv_nsec/1e9;
 }
+static pthread_mutex_t device_mu=PTHREAD_MUTEX_INITIALIZER;
+static HvHostDevice host_device;
+uint64_t hv_share_device_begin(int controls) {
+    uint64_t session; do { arc4random_buf(&session,sizeof session); session>>=1; } while(!session);
+    pthread_mutex_lock(&device_mu); hv_device_begin(&host_device,session,controls); pthread_mutex_unlock(&device_mu); return session;
+}
+void hv_share_device_stop(uint64_t session) {
+    pthread_mutex_lock(&device_mu); hv_device_stop(&host_device,session); pthread_mutex_unlock(&device_mu);
+}
+int hv_share_device_publish(uint64_t session,const HvHostDeviceStatus *status) {
+    if(!status) return 0;
+    pthread_mutex_lock(&device_mu); int ok=hv_device_publish(&host_device,session,*status,focus_now()); pthread_mutex_unlock(&device_mu); return ok;
+}
+int hv_share_device_take(uint64_t session,int *field,uint64_t *revision,double *value) {
+    if(!field || !revision || !value) return 0;
+    pthread_mutex_lock(&device_mu); int ok=hv_device_take(&host_device,session,field,revision,value,focus_now()); pthread_mutex_unlock(&device_mu); return ok;
+}
+int hv_share_device_ack(uint64_t session,int field,uint64_t revision,double actual) {
+    pthread_mutex_lock(&device_mu); int ok=hv_device_ack(&host_device,session,field,revision,actual); pthread_mutex_unlock(&device_mu); return ok;
+}
 static pthread_mutex_t target_mu=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t target_cond=PTHREAD_COND_INITIALIZER;
 static HvTouchTarget target;
@@ -778,6 +798,24 @@ static int clipboard_put(Conn *c, Request *r) {
 
 static int serve_henge(Conn *c, Request *r) {
     const char *what = r->path + strlen("/.henge/");
+    if(!strcmp(what,"device-status") && !strcmp(r->method,"GET")) {
+        if(body_discard(c,r)!=0) return -1;
+        char body[1400];
+        pthread_mutex_lock(&device_mu); int enabled=host_device.enabled,n=hv_device_json(&host_device,body,sizeof body,focus_now()); pthread_mutex_unlock(&device_mu);
+        if(!enabled) return respond_empty(c,r,403,"Forbidden");
+        if(!n) return respond_empty(c,r,503,"Service Unavailable");
+        return respond(c,r,200,"OK","Content-Type: application/json\r\nCache-Control: no-store\r\n",body,(size_t)n);
+    }
+    if(!strcmp(what,"device-control") && !strcmp(r->method,"PUT")) {
+        if(r->chunked || r->length<1 || r->length>=128) { r->close=1; return respond_empty(c,r,400,"Bad Request"); }
+        size_t n=0; char *body=body_small(c,r,&n); if(!body) return -1;
+        uint64_t session=0,revision=0; int field=0; double value=0;
+        int valid=hv_device_command_parse(body,n,&session,&field,&revision,&value); free(body);
+        if(!valid) return respond_empty(c,r,400,"Bad Request");
+        pthread_mutex_lock(&device_mu); int code=hv_device_request(&host_device,session,field,revision,value,focus_now()); pthread_mutex_unlock(&device_mu);
+        const char *reason=code==202?"Accepted":code==403?"Forbidden":code==409?"Conflict":code==503?"Service Unavailable":"Bad Request";
+        return respond_empty(c,r,code,reason);
+    }
     int target_v2=!strcmp(what,"touch-target-v2");
     if ((!strcmp(what,"touch-target") || target_v2) && !strcmp(r->method,"GET")) {
         if(body_discard(c,r)!=0) return -1;

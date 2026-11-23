@@ -13,11 +13,13 @@ struct SessionView: View {
         self.mac = mac
         self.close = close
         _sidebar = State(initialValue: SidebarPreferences.load(for: mac.id))
+        _deviceBridge = StateObject(wrappedValue: HostDeviceBridge(macID: mac.id))
     }
 
     @State private var sidebar: SidebarPreferences
 
     @StateObject private var display = DisplayRouter()
+    @StateObject private var deviceBridge: HostDeviceBridge
     @StateObject private var fileTransfers = FileTransfers()
     @StateObject private var gamepad = HardwareGamepad.shared
     @State private var error: String?
@@ -341,6 +343,11 @@ struct SessionView: View {
         .modifier(ExternalMacDisplayModifier(presentation: MacPresentation(display: display, aspect: mac.aspect)))
         .task(id: bootAttempt) { await run() }
         .task { await Sharing.followMacClipboard() }
+        .task(id: DeviceBridgeActivity(active: state == 1 && scenePhase == .active && deviceBridge.settings.shareStatus,
+                                       controls: deviceBridge.settings.allowControls)) {
+            await deviceBridge.follow(active: state == 1 && scenePhase == .active && deviceBridge.settings.shareStatus,
+                                      external: { display.isExternal })
+        }
         .task { await gamepad.followGuest() }
     }
 
@@ -693,6 +700,7 @@ struct SessionView: View {
                 }
                 Section("Keyboard") { KeyboardOptions() }
                 Section("Floating Sidebar") { SidebarOptions(preferences: $sidebar) }
+                Section("Device Integration") { DeviceIntegrationOptions(bridge: deviceBridge) }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {
                         Text("1×").tag(1)

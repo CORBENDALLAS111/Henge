@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "host_device.h"
 
 /* Builds the machine from imported files, on the JIT region the app holds
    (henge_ios_jit_prewarm), and starts it. 0, or -1 with a reason in err. */
@@ -85,6 +86,13 @@ uint64_t henge_share_target_request(double x,double y);
 int henge_share_target_result(uint64_t id);
 int henge_share_target_object(uint64_t id,int *kind,uint32_t *capabilities,double bounds[4]);
 void henge_share_target_cancel(uint64_t id);
+uint64_t henge_share_device_begin(int controls);
+void henge_share_device_stop(uint64_t session);
+int henge_share_device_publish(uint64_t session,const HvHostDeviceStatus *status);
+int henge_share_device_take(uint64_t session,int *field,uint64_t *revision,double *value);
+int henge_share_device_ack(uint64_t session,int field,uint64_t revision,double actual);
+int henge_vm_audio_gain(double level);
+double henge_vm_audio_current_gain(void);
 
 /* The size macOS is told its screen is. Before henge_vm_boot. */
 void henge_vm_set_display(uint32_t width, uint32_t height);
