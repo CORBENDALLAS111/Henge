@@ -1,5 +1,6 @@
 #include "pvg_lite.h"
 #include "share.h"
+#include "audio_mac.h"
 #include "net_slirp.h"
 #include <sys/mman.h>
 #include "henge-vm.h"
@@ -426,6 +427,18 @@ void henge_share_set_clipboard(const char *text) { hv_share_set_clipboard(text);
 char *henge_share_take_clipboard(void) { return hv_share_take_clipboard(); }
 void henge_share_set_focus_enabled(int enabled) { hv_share_set_focus_enabled(enabled); }
 int henge_share_focus(double bounds[4], double *age) { return hv_share_focus(bounds,age); }
+void henge_share_set_target_enabled(int enabled) { hv_share_set_target_enabled(enabled); }
+uint64_t henge_share_target_request(double x,double y) { return hv_share_target_request(x,y); }
+int henge_share_target_result(uint64_t id) { return hv_share_target_result(id); }
+int henge_share_target_object(uint64_t id,int *kind,uint32_t *capabilities,double bounds[4]) { return hv_share_target_object(id,kind,capabilities,bounds); }
+void henge_share_target_cancel(uint64_t id) { hv_share_target_cancel(id); }
+uint64_t henge_share_device_begin(int controls) { return hv_share_device_begin(controls); }
+void henge_share_device_stop(uint64_t session) { hv_share_device_stop(session); }
+int henge_share_device_publish(uint64_t session,const HvHostDeviceStatus *status) { return hv_share_device_publish(session,status); }
+int henge_share_device_take(uint64_t session,int *field,uint64_t *revision,double *value) { return hv_share_device_take(session,field,revision,value); }
+int henge_share_device_ack(uint64_t session,int field,uint64_t revision,double actual) { return hv_share_device_ack(session,field,revision,actual); }
+int henge_vm_audio_gain(double level) { return hv_audio_set_gain(level); }
+double henge_vm_audio_current_gain(void) { return hv_audio_get_gain(); }
 long henge_share_agent_seen(void) { return hv_share_agent_seen(); }
 
 int henge_vm_display_pixels(uint32_t *width, uint32_t *height) {

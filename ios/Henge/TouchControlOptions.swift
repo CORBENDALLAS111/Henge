@@ -4,6 +4,8 @@ struct TouchControlOptions: View {
     @Binding var mode: String
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
+    @AppStorage(DirectMultiTouchGate.contextTapKey) private var twoFingerContextTap = false
+    @AppStorage(DirectContactGesture.smartTargetsKey) private var smartTargets = false
     var body: some View {
         Picker("Control method", selection: $mode) {
             Text("Trackpad").tag("trackpad")
@@ -14,9 +16,17 @@ struct TouchControlOptions: View {
              : "Swipe to move the pointer. Tap to click, or hold then move to drag.")
             .font(.footnote).foregroundStyle(.secondary)
         if mode == "direct" {
+            Toggle("Two-finger tap for context menu", isOn: $twoFingerContextTap)
+            Text("Optional: a quick stationary two-finger tap right-clicks between your fingers. Scrolling, pinch and long press keep their existing behavior.")
+                .font(.footnote).foregroundStyle(.secondary)
             Toggle("One-finger scrolling", isOn: $oneFingerScrolling)
+            if oneFingerScrolling {
+                Toggle("Smart drag and scroll (guest helper)", isOn: $smartTargets)
+                Text("Experimental. Update the guest helper in Details, Sharing, and allow it in macOS Accessibility. Recognizes text fields, buttons, sliders and scroll areas. Sliders move precisely along their reported axis. Choose Keyboard → On text fields for the automatic keyboard. Unsupported or slow apps keep the normal gestures; field contents are not read.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Text(oneFingerScrolling
-                 ? "Swipe to scroll. To drag, pause briefly before moving; keep holding still for a context menu. Scrolling follows the Mac's natural direction and inertia settings. Apple Pencil still drags directly."
+                 ? "Swipe to scroll. To drag immediately, tap, then touch the same object again and move without lifting. Or pause briefly before moving. Keep holding still for a context menu. Scrolling follows the Mac's natural direction and inertia settings. Apple Pencil still drags directly."
                  : "Move one finger to drag. Use two fingers to scroll, or enable one-finger scrolling above.")
                 .font(.footnote).foregroundStyle(.secondary)
         }

@@ -2,6 +2,7 @@
    whose render callback pulls PCM straight from the virtio-snd ring. The unit
    is set to the stream's own format, and CoreAudio converts to the device. */
 #include "audio_mac.h"
+#include "audio_gain.h"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <TargetConditionals.h>
@@ -13,6 +14,15 @@
 #define HV_OUTPUT_UNIT kAudioUnitSubType_DefaultOutput
 #endif
 #include <stdio.h>
+#include <stdatomic.h>
+
+_Static_assert(HV_AUDIO_PCM_S16==HV_VSND_FMT_S16 && HV_AUDIO_PCM_S32==HV_VSND_FMT_S32 && HV_AUDIO_PCM_FLOAT==HV_VSND_FMT_FLOAT,"PCM gain format contract");
+static _Atomic unsigned output_gain=1000;
+int hv_audio_set_gain(double level) {
+    if(!isfinite(level) || level<0 || level>1) return -1;
+    atomic_store_explicit(&output_gain,(unsigned)lround(level*1000),memory_order_relaxed); return 0;
+}
+double hv_audio_get_gain(void) { return atomic_load_explicit(&output_gain,memory_order_relaxed)/1000.0; }
 
 static AudioComponentInstance unit;
 static int unit_running;
@@ -22,8 +32,11 @@ static OSStatus render(void *ref, AudioUnitRenderActionFlags *flags, const Audio
                        UInt32 frames, AudioBufferList *io) {
     (void)flags, (void)ts, (void)bus, (void)frames;
     HvVirtioSnd *d = ref;
-    for (UInt32 i = 0; i < io->mNumberBuffers; i++)
+    unsigned gain=atomic_load_explicit(&output_gain,memory_order_relaxed);
+    for (UInt32 i = 0; i < io->mNumberBuffers; i++) {
         hv_virtio_snd_pull(d, io->mBuffers[i].mData, io->mBuffers[i].mDataByteSize);
+        hv_audio_scale_pcm(io->mBuffers[i].mData,io->mBuffers[i].mDataByteSize,cur_format,gain);
+    }
     return noErr;
 }
 

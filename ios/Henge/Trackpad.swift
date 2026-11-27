@@ -257,7 +257,7 @@ struct MouseButton: View {
                     .onEnded { _ in
                         down = false
                         henge_vm_mouse_button(button, 0)
-                        StickyKeys.shared.releaseAll()
+                        StickyKeys.shared.releaseAfterPointer()
                     }
             )
             .accessibilityLabel(title)

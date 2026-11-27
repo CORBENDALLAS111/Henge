@@ -48,16 +48,16 @@ IDR_SRC = $(wildcard third_party/idevicerestore/src/*.c)
 RESTORE_OBJ = $(patsubst third_party/%.c,$(RB)/%.o,$(IRECV_SRC) $(MUXD_SRC) $(IDR_SRC))
 
 # The helper that runs inside macOS on a virtual Mac (share.c serves it to the guest).
-$(B)/henge-agent: tools/henge-agent.m
+$(B)/henge-agent: tools/henge-agent.m tools/device-menu.m tools/agent-http.h tools/touch-target-policy.h host/touch_target.h host/host_device.h
 	@mkdir -p $(B)
-	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit -framework ApplicationServices $< -o $@
+	env -u SDKROOT -u IPHONEOS_DEPLOYMENT_TARGET xcrun --sdk macosx clang -arch arm64 -mmacosx-version-min=12.0 -fobjc-arc -Wall -Wextra -O2 -framework AppKit -framework ApplicationServices $(filter %.m,$^) -o $@
 	codesign -f -s - $@
 
 # Compressed in the app: tools that sign an IPA would try to sign a bare Mach-O too.
 $(B)/henge-agent.gz: $(B)/henge-agent
 	gzip -9 -n -c $< > $@
 
-$(B)/share.o: host/share.c host/share.h
+$(B)/share.o: host/share.c host/share.h host/input_focus.h host/touch_target.h host/host_device.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(B)/hengevm: host/main.c $(ENGINE) $(DEV) $(B)/pvg_mac.o $(B)/net_slirp.o $(B)/dns_proxy.o $(B)/share.o $(B)/audio_mac.o $(B)/vm.o $(B)/legacy_vmm.o $(B)/legacy_vmm_policy.o $(B)/legacy_dtree.o $(B)/snapshot.o $(B)/dt_fixup.o $(B)/usb_host.o $(B)/mac-restore/libhengerestore.a
@@ -129,8 +129,13 @@ $(B)/test_dt_fixup: tests/test_dt_fixup.c host/dt_fixup.c host/dt_fixup.h | $(B)
 $(B)/test_%: tests/test_%.c tests/%_programs.S tests/harness.S tests/harness.h $(ENGINE)
 	$(CC) $(CFLAGS) -Itests tests/test_$*.c tests/$*_programs.S tests/harness.S $(ENGINE) -o $@
 
-test: all
+test: all test-core
+
+# Run the existing CPU/JIT/MMU/device suite without building restore tools or
+# a Hypervisor.framework reference VM, which aren't dependencies of the tests.
+test-core: $(TESTS)
 	@ulimit -s 65520; for t in $(TESTS); do echo "== $$t"; $$t || exit 1; done # a test keeps a whole HvCpu (2 MB of TLB and more) on its stack
+.PHONY: test test-core
 
 $(B):
 	mkdir -p $(B)
@@ -338,7 +343,7 @@ test-gamepad-sample: $(B)/test_gamepad_sample
 .PHONY: test-gamepad-sample
 
 # Gesture policy is independent of UIKit and a running guest.
-$(B)/test_direct_contact_gesture: ios/Henge/DirectContactGesture.swift ios/Henge/DirectMultiTouchGate.swift tests/test_direct_contact_gesture.swift | $(B)
+$(B)/test_direct_contact_gesture: ios/Henge/GuestTouchObject.swift ios/Henge/DirectContactGesture.swift ios/Henge/DirectMultiTouchGate.swift tests/test_direct_contact_gesture.swift | $(B)
 	xcrun --sdk macosx swiftc $^ -o $@
 
 test-direct-contact: $(B)/test_direct_contact_gesture
@@ -363,7 +368,7 @@ test-apple-account-support: $(B)/test_apple_account_support
 # Keyboard viewport is independent of UIKit; guest focus is a metadata-only HTTP channel.
 $(B)/test_keyboard_viewport: ios/Henge/KeyboardViewport.swift tests/test_keyboard_viewport.swift | $(B)
 	xcrun --sdk macosx swiftc $^ -o $@
-$(B)/test_input_focus: tests/test_input_focus.c host/share.c host/share.h host/input_focus.h | $(B)
+$(B)/test_input_focus: tests/test_input_focus.c host/share.c host/share.h host/input_focus.h host/touch_target.h host/host_device.h | $(B)
 	$(CC) $(CFLAGS) -pthread tests/test_input_focus.c host/share.c -o $@
 test-keyboard-input: $(B)/test_keyboard_viewport $(B)/test_input_focus
 	$(B)/test_keyboard_viewport
@@ -397,3 +402,40 @@ $(B)/test_pvg_retry: tests/test_pvg_retry.c devices/pvg_retry.h | $(B)
 test-pvg-retry: $(B)/test_pvg_retry
 	$(B)/test_pvg_retry
 .PHONY: test-pvg-retry
+
+$(B)/test_modifier_ownership: ios/Henge/ModifierOwnership.swift tests/test_modifier_ownership.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-modifier-ownership: $(B)/test_modifier_ownership
+	$(B)/test_modifier_ownership
+.PHONY: test-modifier-ownership
+
+$(B)/test_sidebar: ios/Henge/SidebarPreferences.swift tests/test_sidebar.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-sidebar: $(B)/test_sidebar
+	$(B)/test_sidebar
+.PHONY: test-sidebar
+
+$(B)/test_touch_target: tests/test_touch_target.c host/touch_target.h tools/touch-target-policy.h | $(B)
+	$(CC) $(CFLAGS) $< -o $@
+test-touch-target: $(B)/test_touch_target
+	$(B)/test_touch_target
+.PHONY: test-touch-target
+
+$(B)/test_guest_touch_object: ios/Henge/GuestTouchObject.swift tests/test_guest_touch_object.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-guest-touch-object: $(B)/test_guest_touch_object
+	$(B)/test_guest_touch_object
+.PHONY: test-guest-touch-object
+
+$(B)/test_host_device: tests/test_host_device.c host/host_device.h | $(B)
+	$(CC) $(CFLAGS) $< -o $@
+$(B)/test_audio_gain: tests/test_audio_gain.c host/audio_gain.h | $(B)
+	$(CC) $(CFLAGS) $< -o $@
+$(B)/test_device_integration_settings: ios/Henge/DeviceIntegrationSettings.swift tests/test_device_integration_settings.swift | $(B)
+	xcrun --sdk macosx swiftc $^ -o $@
+test-host-device: $(B)/test_host_device $(B)/test_audio_gain $(B)/test_device_integration_settings $(B)/test_input_focus
+	$(B)/test_host_device
+	$(B)/test_audio_gain
+	$(B)/test_device_integration_settings
+	$(B)/test_input_focus
+.PHONY: test-host-device

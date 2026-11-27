@@ -9,7 +9,17 @@ struct SessionView: View {
     let mac: VirtualMac
     let close: () -> Void
 
+    init(mac: VirtualMac, close: @escaping () -> Void) {
+        self.mac = mac
+        self.close = close
+        _sidebar = State(initialValue: SidebarPreferences.load(for: mac.id))
+        _deviceBridge = StateObject(wrappedValue: HostDeviceBridge(macID: mac.id))
+    }
+
+    @State private var sidebar: SidebarPreferences
+
     @StateObject private var display = DisplayRouter()
+    @StateObject private var deviceBridge: HostDeviceBridge
     @StateObject private var fileTransfers = FileTransfers()
     @StateObject private var gamepad = HardwareGamepad.shared
     @State private var error: String?
@@ -36,6 +46,8 @@ struct SessionView: View {
     @AppStorage("henge.touch.mode") private var touchMode = "direct"
     @AppStorage(DirectContactGesture.scrollKey) private var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     @AppStorage(DirectContactGesture.pencilTabletKey) private var pencilTablet = true
+    @AppStorage(DirectMultiTouchGate.contextTapKey) private var twoFingerContextTap = false
+    @AppStorage(DirectContactGesture.smartTargetsKey) private var smartTargets = false
     @AppStorage("henge.cursor.scale") private var cursorScale = Device.isPad ? 1 : 3
     @AppStorage("henge.cursor.sharp") private var sharpCursor = true
     @AppStorage(HardwareMouse.scrollSpeedKey) private var scrollSpeed = 0.3
@@ -49,6 +61,7 @@ struct SessionView: View {
     @State private var keyboardPanStart: CGFloat?
     @State private var keyboardTapAt: TimeInterval?
     @State private var keyboardTapPoint: CGPoint?
+    @State private var keyboardTapEditable: Bool?
     @State private var zoomed = false
     @State private var showDetails = false
     @State private var showFiles = false
@@ -131,7 +144,7 @@ struct SessionView: View {
                         .frame(width: layout.touch.width, height: layout.touch.height)
                         .position(x: layout.touch.midX, y: layout.touch.midY)
                     if !display.isExternal {
-                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet,
+                        DirectTouchSurface(isActive: touchInputActive, directFingers: touchMode == "direct", oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet, twoFingerContextTap: twoFingerContextTap, smartTargets: smartTargets,
                                            imageFrame: layout.screen.offsetBy(dx: -layout.touch.minX, dy: -layout.touch.minY))
                             .frame(width: layout.touch.width, height: layout.touch.height)
                             .position(x: layout.touch.midX, y: layout.touch.midY)
@@ -201,6 +214,11 @@ struct SessionView: View {
                         .accessibilityLabel("Move Mac view vertically")
                         .accessibilityAdjustableAction { direction in keyboardPan += direction == .increment ? 32 : -32 }
                 }
+                if sidebar.enabled && touchInputActive && !controlsHidden {
+                    FloatingSidebar(preferences: $sidebar, keyboardVisible: $typing,
+                                    size: full, insets: insets,
+                                    keyboardTop: typing && !keyboardRect.isEmpty ? keyboardRect.minY : nil)
+                }
                 KeyboardCatcher(active: $typing).frame(width: 0, height: 0)
             }
             .background(KeyboardFrameReader { keyboardRect = $0 })
@@ -251,18 +269,25 @@ struct SessionView: View {
             guard touchInputActive, !display.isExternal,
                   let x = note.userInfo?["x"] as? Double, let y = note.userInfo?["y"] as? Double else { return }
             keyboardTapPoint = CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+            keyboardTapEditable = note.userInfo?["editable"] as? Bool
             keyboardTapAt = ProcessInfo.processInfo.systemUptime
         }
         .onChange(of: typing) { _, shown in if !shown { keyboardPan = 0; keyboardTapAt = nil; keyboardTapPoint = nil } }
         .onChange(of: keyboardMode == "text" && touchInputActive, initial: true) { _, enabled in henge_share_set_focus_enabled(enabled ? 1 : 0) }
+        .onChange(of: smartTargets && oneFingerScrolling && touchMode == "direct" && touchInputActive && !display.isExternal, initial: true) { _, enabled in
+            henge_share_set_target_enabled(enabled ? 1 : 0)
+        }
         .task(id: keyboardMode) { await followKeyboardFocus() }
         .onAppear { henge_vm_set_local_discovery(UserDefaults.standard.bool(forKey: ConnectivityView.discoveryKey) ? 1 : 0) }
         .onChange(of: hideGuestCursor, initial: true) { _, hidden in henge_vm_set_cursor_hidden(hidden ? 1 : 0) }
-        .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0) }
+        .onDisappear { henge_vm_set_cursor_hidden(0); henge_share_set_focus_enabled(0); henge_share_set_target_enabled(0) }
         .onChange(of: pointerNeeded) { PointerLock.set(!$0) }
         .onChange(of: touchMode) { _ in resetPointerInput() }
+        .onChange(of: sidebar) { _, value in value.save(for: mac.id) }
         .onChange(of: oneFingerScrolling) { _ in resetPointerInput() }
         .onChange(of: pencilTablet) { _ in resetPointerInput() }
+        .onChange(of: twoFingerContextTap) { _ in resetPointerInput() }
+        .onChange(of: smartTargets) { _ in resetPointerInput() }
         .onChange(of: touchInputActive) { HardwareMouse.shared.setActive($0) }
         .onChange(of: controllerInputActive) { _, on in gamepad.setActive(on) }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect).receive(on: DispatchQueue.main)) { _ in
@@ -318,6 +343,11 @@ struct SessionView: View {
         .modifier(ExternalMacDisplayModifier(presentation: MacPresentation(display: display, aspect: mac.aspect)))
         .task(id: bootAttempt) { await run() }
         .task { await Sharing.followMacClipboard() }
+        .task(id: DeviceBridgeActivity(active: state == 1 && scenePhase == .active && deviceBridge.settings.shareStatus,
+                                       controls: deviceBridge.settings.allowControls)) {
+            await deviceBridge.follow(active: state == 1 && scenePhase == .active && deviceBridge.settings.shareStatus,
+                                      external: { display.isExternal })
+        }
         .task { await gamepad.followGuest() }
     }
 
@@ -406,7 +436,8 @@ struct SessionView: View {
                 switch request.resolve(now: ProcessInfo.processInfo.systemUptime, inputActive: touchInputActive,
                                        penIdle: henge_vm_pen_idle() != 0, mode: keyboardMode,
                                        keyboardVisible: typing, focusStatus: focused, focusAge: age,
-                                       focusBounds: CGRect(x: CGFloat(rect[0]), y: CGFloat(rect[1]), width: CGFloat(rect[2]), height: CGFloat(rect[3]))) {
+                                       focusBounds: CGRect(x: CGFloat(rect[0]), y: CGFloat(rect[1]), width: CGFloat(rect[2]), height: CGFloat(rect[3])),
+                                       targetEditable: keyboardTapEditable) {
                 case .wait: break
                 case .discard: keyboardTapAt = nil; keyboardTapPoint = nil
                 case .apply(let target, let open):
@@ -668,6 +699,8 @@ struct SessionView: View {
                     TouchControlOptions(mode: $touchMode)
                 }
                 Section("Keyboard") { KeyboardOptions() }
+                Section("Floating Sidebar") { SidebarOptions(preferences: $sidebar) }
+                Section("Device Integration") { DeviceIntegrationOptions(bridge: deviceBridge) }
                 Section("Pointer") {
                     Picker("Size", selection: $cursorScale) {
                         Text("1×").tag(1)
@@ -710,8 +743,8 @@ struct SessionView: View {
                         showDetails = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showFiles = true }
                     }
-                    if !helperRunning {
-                        Button("Type the Set Up Command") {
+                    Group {
+                        Button(helperRunning ? "Type the Update Command" : "Type the Set Up Command") {
                             showDetails = false
                             Task {
                                 try? await Task.sleep(nanoseconds: 600_000_000)
@@ -720,7 +753,7 @@ struct SessionView: View {
                         }
                     }
                     Text(helperRunning
-                         ? "Put files in Files, Henge, Shared to see them in the Henge folder in this Mac's home folder. What you copy on the Mac is copied here too, and the paste button pastes from here into the Mac."
+                         ? "Put files in Files, Henge, Shared to see them in the Henge folder in this Mac's home folder. What you copy on the Mac is copied here too, and the paste button pastes from here into the Mac. Run the Update Command in the Mac's Terminal after updating Henge to refresh guest-helper features."
                          : "Once for each Mac: open Terminal on the Mac, tap this, then press Return. When macOS asks about henge-agent and local networks, choose Allow. It types \(Sharing.setUpCommand) and needs the Mac's keyboard layout to be U.S.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

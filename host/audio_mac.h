@@ -7,5 +7,7 @@
 void hv_audio_attach(HvVirtioSnd *d);
 /* Stops and disposes the output unit, waiting for its last render callback. */
 void hv_audio_detach(void);
+int hv_audio_set_gain(double level); /* host-side attenuation, independent of system volume */
+double hv_audio_get_gain(void);
 
 #endif

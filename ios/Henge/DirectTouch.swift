@@ -5,7 +5,7 @@ import UIKit
 enum TouchInputSafety {
     static let reset = Notification.Name("henge.input.reset")
     static let pencilPresence = Notification.Name("henge.input.pencilPresence")
-    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, or hold still for a right-click. With one-finger scrolling enabled, swipe to scroll and pause briefly then move to drag. With it disabled, move to drag and use two fingers to scroll. A two-finger tap does not click. Pencil: tap to click, move to drag, or hold still then lift to double-click. Pencil Pro adds hover, pressure, tilt and barrel roll; double-tap switches eraser and squeeze opens a context menu, according to Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
+    static let directDescription = "Direct Touch: tap to click, tap twice to double-click, or hold still for a right-click. With one-finger scrolling enabled, swipe to scroll. To drag, tap then immediately touch the same object again and move without lifting, or pause briefly before moving. With scrolling disabled, move to drag and use two fingers to scroll. Two-finger context taps are optional in Touch Controls. Pencil: graphics tablet mode starts a stroke immediately; desktop mode supports clicks and drag. Supported Pencil input includes hover, pressure, tilt and barrel roll; double-tap and squeeze follow Pencil settings. Disconnect a physical mouse to use direct input. After updating Henge, shut down and start the Mac once."
 }
 
 struct DirectTouchSurface: UIViewRepresentable {
@@ -13,10 +13,12 @@ struct DirectTouchSurface: UIViewRepresentable {
     var directFingers = true
     var oneFingerScrolling = DirectContactGesture.defaultOneFingerScrolling
     var pencilTablet = true
+    var twoFingerContextTap = false
+    var smartTargets = false
     var imageFrame: CGRect? = nil
     func makeUIView(context: Context) -> Surface { Surface() }
     func updateUIView(_ view: Surface, context: Context) {
-        view.setActive(isActive, directFingers: directFingers, oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet)
+        view.setActive(isActive, directFingers: directFingers, oneFingerScrolling: oneFingerScrolling, pencilTablet: pencilTablet, twoFingerContextTap: twoFingerContextTap, smartTargets: smartTargets)
         view.setImageFrame(imageFrame)
     }
     static func dismantleUIView(_ view: Surface, coordinator: ()) { view.reset() }
@@ -26,6 +28,14 @@ struct DirectTouchSurface: UIViewRepresentable {
         private var directFingers = true
         private var oneFingerScrolling = false
         private var pencilTablet = true
+        private var twoFingerContextTap = false
+        private var smartTargets = false
+        private var targetQuery: UInt64 = 0
+        private var targetPoll: DispatchWorkItem?
+        private var deferredMotion: (point: CGPoint, time: TimeInterval)?
+        private var targetObject: GuestTouchObject?
+        private var fingerStartedAt: TimeInterval?
+        private var multiTapPoint: CGPoint?
         private var scroll = OneFingerScroll()
         private var proximity = PencilProximity()
         private var displayFrame: CGRect?
@@ -80,7 +90,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             observer = NotificationCenter.default.addObserver(forName: TouchInputSafety.reset, object: nil, queue: .main) { [weak self] _ in self?.reset() }
         }
         required init?(coder: NSCoder) { fatalError("Created in code") }
-        deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; pendingDown?.cancel(); pendingLeave?.cancel() }
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; pendingDown?.cancel(); pendingLeave?.cancel(); targetPoll?.cancel(); henge_share_target_cancel(targetQuery) }
         override func layoutSubviews() {
             super.layoutSubviews()
             if let previousSize, previousSize != bounds.size { reset() }
@@ -95,11 +105,13 @@ struct DirectTouchSurface: UIViewRepresentable {
             setNeedsLayout()
         }
         private var usable: Bool { activeInput && !HardwareMouse.shared.hasMouse && henge_vm_pen_ready() != 0 }
-        func setActive(_ active: Bool, directFingers: Bool, oneFingerScrolling: Bool, pencilTablet: Bool) {
-            if !active || self.directFingers != directFingers || self.oneFingerScrolling != oneFingerScrolling || self.pencilTablet != pencilTablet { reset() }
+        func setActive(_ active: Bool, directFingers: Bool, oneFingerScrolling: Bool, pencilTablet: Bool, twoFingerContextTap: Bool, smartTargets: Bool) {
+            if !active || self.directFingers != directFingers || self.oneFingerScrolling != oneFingerScrolling || self.pencilTablet != pencilTablet || self.twoFingerContextTap != twoFingerContextTap || self.smartTargets != smartTargets { reset() }
             self.directFingers = directFingers
             self.oneFingerScrolling = oneFingerScrolling
             self.pencilTablet = pencilTablet
+            self.twoFingerContextTap = twoFingerContextTap
+            self.smartTargets = smartTargets
             gestures.allowsTouchscreenClicks = !directFingers
             activeInput = active
             isUserInteractionEnabled = active
@@ -111,6 +123,8 @@ struct DirectTouchSurface: UIViewRepresentable {
                 : eraser ? "Apple Pencil: eraser" : nil
         }
         func reset() {
+            cancelTargetQuery()
+            targetObject = nil
             pendingDown?.cancel(); pendingDown = nil
             pendingLeave?.cancel(); pendingLeave = nil
             classifier.reset()
@@ -121,9 +135,36 @@ struct DirectTouchSurface: UIViewRepresentable {
             henge_vm_pen_cancel()
             gestures.reset()
             primary = nil; fingers.removeAll(); multi = false; contact = false
-            multiGate.reset(); multiOrigins.removeAll()
+            multiGate.reset(); multiOrigins.removeAll(); multiTapPoint = nil; fingerStartedAt = nil
             lastHover = nil; lastHoverTime = 0
             updateStatus()
+        }
+
+        private func cancelTargetQuery() {
+            classifier.expireTarget()
+            targetPoll?.cancel(); targetPoll = nil
+            if targetQuery != 0 { henge_share_target_cancel(targetQuery) }
+            targetQuery = 0; deferredMotion = nil
+        }
+        private func pollTarget(_ id: UInt64, began: TimeInterval) {
+            guard id != 0, targetQuery == id, primary?.type == .direct, !multi, usable else { cancelTargetQuery(); return }
+            let now = ProcessInfo.processInfo.systemUptime
+            var kind: Int32 = 0, capabilities: UInt32 = 0
+            var rect = [Double](repeating: 0, count: 4)
+            let hint = rect.withUnsafeMutableBufferPointer { henge_share_target_object(id, &kind, &capabilities, $0.baseAddress) }
+            if hint != -2 || now - began >= DirectContactGesture.targetWait || !classifier.awaitingTarget {
+                let object = GuestTouchObject(kind: kind, capabilities: capabilities,
+                                             bounds: CGRect(x: rect[0], y: rect[1], width: rect[2], height: rect[3]))
+                if classifier.resolveTarget(DirectContactGesture.TargetHint(rawValue: hint) ?? .automatic,
+                                            time: now, object: object, imageFrame: imageBounds) { targetObject = object }
+                let motion = deferredMotion
+                cancelTargetQuery()
+                if let motion { perform(classifier.move(motion.point, time: motion.time)) }
+                return
+            }
+            let work = DispatchWorkItem { [weak self] in self?.pollTarget(id, began: began) }
+            targetPoll = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.008, execute: work)
         }
         func pointerInteraction(_ interaction: UIPointerInteraction, styleFor region: UIPointerRegion) -> UIPointerStyle? { .hidden() }
 
@@ -207,9 +248,11 @@ struct DirectTouchSurface: UIViewRepresentable {
                               send(p, flags: range | Int32(HENGE_PEN_DESKTOP_UP)) else { return }
                     }
                     if !secondary {
-                        NotificationCenter.default.post(name: SessionKeyboard.directTap, object: nil, userInfo: [
+                        var info: [String: Any] = [
                             "x": Double((p.x - imageBounds.minX) / max(imageBounds.width, 1)),
-                            "y": Double((p.y - imageBounds.minY) / max(imageBounds.height, 1))])
+                            "y": Double((p.y - imageBounds.minY) / max(imageBounds.height, 1))]
+                        if let editable = targetObject?.keyboardEditable { info["editable"] = editable }
+                        NotificationCenter.default.post(name: SessionKeyboard.directTap, object: nil, userInfo: info)
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
@@ -218,7 +261,15 @@ struct DirectTouchSurface: UIViewRepresentable {
         private func scrollPoint(_ point: CGPoint) -> CGPoint {
             CGPoint(x: point.x - imageBounds.minX, y: point.y - imageBounds.minY)
         }
-        private func beginMulti(_ touches: Set<UITouch>, event: UIEvent?) {
+        private func beginMulti(_ touches: Set<UITouch>, event: UIEvent?, allowContextTap: Bool = false) {
+            if !multi {
+                let time = touches.map(\.timestamp).max() ?? ProcessInfo.processInfo.systemUptime
+                let points = fingers.map { $0.location(in: self) }
+                if allowContextTap, twoFingerContextTap, fingers.count == 2, let start = fingerStartedAt,
+                   time >= start, time - start <= 0.3, points.allSatisfy({ imageBounds.contains($0) }) {
+                    multiTapPoint = CGPoint(x: points.map(\.x).reduce(0, +) / 2, y: points.map(\.y).reduce(0, +) / 2)
+                } else { multiTapPoint = nil }
+            }
             multi = true
             if directFingers {
                 multiGate.begin(count: fingers.count, time: touches.map(\.timestamp).min() ?? ProcessInfo.processInfo.systemUptime)
@@ -253,18 +304,29 @@ struct DirectTouchSurface: UIViewRepresentable {
                 return
             }
             guard usable else { updateStatus(); return }
+            if fingers.isEmpty { fingerStartedAt = first.timestamp }
             fingers.formUnion(direct)
             if fingers.count >= 2 {
                 if !multi {
+                    cancelTargetQuery()
+                    targetObject = nil
+                    let allowContextTap = !contact && (primary.map { classifier.canJoinContextTap(at: $0.location(in: self)) } ?? true)
                     pendingDown?.cancel(); pendingDown = nil
                     sendScroll(scroll.end(time: first.timestamp))
                     henge_vm_pen_cancel(); classifier.reset(); showTouch(nil); contact = false; primary = nil
-                    beginMulti(fingers, event: event)
+                    beginMulti(fingers, event: event, allowContextTap: allowContextTap)
                 } else { beginMulti(direct, event: event) }
                 return
             }
             primary = first; startPoint = first.location(in: self); lastPoint = startPoint
-            classifier.begin(startPoint, tool: .finger, time: first.timestamp, scrollFingerSwipes: oneFingerScrolling)
+            cancelTargetQuery()
+            targetObject = nil
+            if smartTargets && oneFingerScrolling {
+                targetQuery = henge_share_target_request(Double((startPoint.x - imageBounds.minX) / imageBounds.width),
+                                                       Double((startPoint.y - imageBounds.minY) / imageBounds.height))
+            }
+            classifier.begin(startPoint, tool: .finger, time: first.timestamp, scrollFingerSwipes: oneFingerScrolling, awaitTarget: targetQuery != 0)
+            if targetQuery != 0 { pollTarget(targetQuery, began: first.timestamp) }
             showTouch(startPoint)
             send(startPoint, flags: 4)
             let work = DispatchWorkItem { [weak self] in
@@ -302,23 +364,37 @@ struct DirectTouchSurface: UIViewRepresentable {
                 showTouch(lastPoint)
                 for sample in event?.coalescedTouches(for: primary) ?? [primary] {
                     perform(classifier.move(sample.location(in: self), time: sample.timestamp))
+                    deferredMotion = classifier.awaitingTarget ? (sample.location(in: self), sample.timestamp) : nil
                 }
             }
         }
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
             if multi {
                 if !directFingers || multiGate.forwarding { gestures.touchesEnded(touches, with: event) }
+                for touch in touches {
+                    if let origin = multiOrigins[touch] {
+                        let p = touch.location(in: self)
+                        multiGate.record(distance: Double(hypot(p.x - origin.x, p.y - origin.y)))
+                    }
+                }
                 fingers.subtract(touches)
                 for touch in touches { multiOrigins.removeValue(forKey: touch) }
                 if fingers.isEmpty {
+                    let time = touches.map(\.timestamp).max() ?? ProcessInfo.processInfo.systemUptime
+                    if directFingers, twoFingerContextTap, usable, let point = multiTapPoint, multiGate.secondaryTap(time: time) {
+                        perform([.click(point, count: 1, secondary: true)])
+                        send(point, flags: 0)
+                        StickyKeys.shared.releaseAfterPointer()
+                    }
                     if directFingers && multiGate.reveal(time: touches.map(\.timestamp).max() ?? ProcessInfo.processInfo.systemUptime) {
                         NotificationCenter.default.post(name: Trackpad.revealTap, object: nil)
                     }
-                    multi = false; multiGate.reset(); multiOrigins.removeAll()
+                    multi = false; multiGate.reset(); multiOrigins.removeAll(); multiTapPoint = nil; fingerStartedAt = nil
                 }
                 return
             }
             guard let t = primary, touches.contains(t) else { fingers.subtract(touches); return }
+            cancelTargetQuery()
             if usable {
                 if t.type == .pencil {
                     perform(classifier.end(t.preciseLocation(in: self), time: t.timestamp), pencilTouch: t)
@@ -345,6 +421,7 @@ struct DirectTouchSurface: UIViewRepresentable {
             pendingDown?.cancel(); pendingDown = nil
             showTouch(nil)
             primary = nil; contact = false; fingers.subtract(touches)
+            targetObject = nil
             StickyKeys.shared.releaseAfterPointer()
         }
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { reset() }

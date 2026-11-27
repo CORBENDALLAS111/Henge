@@ -1,5 +1,31 @@
 # Experimental absolute touch and Apple Pencil
 
+## Scroll and drag together
+
+With one-finger scrolling on, a single swipe scrolls. To drag a window, icon or
+selection immediately, **tap once, then touch the same object again and move
+without lifting the second touch**. The second touch starts a drag after the
+normal movement threshold, even when moving immediately. Two stationary taps
+still send two clicks. The second touch must begin within 350 ms of the first
+tap's release and within 24 host points. Scene/mode/layout changes and
+multi-touch cancel this history. Pausing 220 ms before moving also permits drag;
+holding still for 550 ms keeps the existing context menu behavior. Pencil and
+Trackpad modes retain their existing drag policy.
+
+## Optional two-finger context tap and sidebar
+
+Details / Settings → Touch Controls → **Two-finger tap for context menu** is
+off by default to preserve existing stationary-tap behavior. When enabled, a
+quick stationary pair right-clicks at its midpoint. A scroll, drag, third finger,
+long press, cancelled gesture, movement on lift or a touch outside the Mac image
+cannot finish as a context click. Moving pairs still use native guest gestures.
+
+Details → **Floating Sidebar** enables actual Mac modifier keys, Escape,
+keyboard visibility, Undo/Redo, Dock toggle and menu-bar focus. Tap a modifier
+for the next key/click or long-press it to Lock. Locks clear when the input
+session is hidden or loses ownership. Side/position/opacity/auto-hide are stored
+per VM; guest disks and saved device layouts do not change.
+
 ## Graphics tablet mode
 
 **Settings / Details → Touch Controls → Pencil as graphics tablet** defaults on.

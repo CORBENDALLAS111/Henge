@@ -62,10 +62,12 @@ PROGRAM p_timer_irq
     mov x2, #1
     msr icc_igrpen1_el1, x2
     mov x2, #24000                  // 1 ms at 24 MHz
+    // Start measuring before TVAL arms its relative deadline. Measuring after
+    // it has already started can legitimately observe less than 24000 ticks.
+    mrs x10, cntvct_el0
     msr cntv_tval_el0, x2
     mov x2, #1
     msr cntv_ctl_el0, x2
-    mrs x10, cntvct_el0
     mov x13, #500                   // give up after about half a second of wakeups
     msr daifclr, #2
 2:  wfi
